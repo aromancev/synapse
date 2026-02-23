@@ -1,0 +1,3 @@
+# synapse
+
+Bootstrapped Go repository.
