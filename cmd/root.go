@@ -4,6 +4,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var dbPath string
+
 var rootCmd = &cobra.Command{
 	Use:   "synapse",
 	Short: "Synapse is an agentic memory system",
@@ -16,5 +18,6 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db-path", "data.db", "path to sqlite database")
 	// Commands added in their own init() functions
 }
