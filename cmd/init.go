@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/aromancev/synapse/src/nodes"
 	"github.com/aromancev/synapse/src/schemas"
 	"github.com/aromancev/synapse/src/settings"
 	"github.com/spf13/cobra"
@@ -28,6 +29,11 @@ var initCmd = &cobra.Command{
 
 		schemasRepo := schemas.NewRepository(db)
 		if err := schemasRepo.Init(context.Background()); err != nil {
+			return err
+		}
+
+		nodesRepo := nodes.NewRepository(db)
+		if err := nodesRepo.Init(context.Background()); err != nil {
 			return err
 		}
 
