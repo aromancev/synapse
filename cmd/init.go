@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/aromancev/synapse/schemas"
-	"github.com/aromancev/synapse/settings"
+	"github.com/aromancev/synapse/src/schemas"
+	"github.com/aromancev/synapse/src/settings"
 	"github.com/spf13/cobra"
 )
 
