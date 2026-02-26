@@ -3,6 +3,7 @@ package schemas
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -31,8 +32,16 @@ func TestRepository(t *testing.T) {
 		ctx := context.Background()
 
 		err := repo.AddSchema(ctx, Schema{
-			Name:   "  person  ",
-			Schema: `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`,
+			Name: "  person  ",
+			Schema: `
+				{
+				  "type": "object",
+				  "properties": {
+				    "name": { "type": "string" }
+				  },
+				  "required": ["name"]
+				}
+			`,
 		})
 		if err != nil {
 			t.Fatalf("add schema: %v", err)
@@ -49,6 +58,9 @@ func TestRepository(t *testing.T) {
 		if schemas[0].Name != "person" {
 			t.Fatalf("expected schema name %q, got %q", "person", schemas[0].Name)
 		}
+		if schemas[0].Schema != `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}` {
+			t.Fatalf("expected normalized one-line schema, got %q", schemas[0].Schema)
+		}
 	})
 
 	t.Run("AddSchema fails for empty name", func(t *testing.T) {
@@ -61,6 +73,61 @@ func TestRepository(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected error for empty schema name")
+		}
+	})
+
+	t.Run("AddSchema fails for invalid name format", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		for _, name := range []string{"Person", "person-name", "имя"} {
+			err := repo.AddSchema(ctx, Schema{
+				Name:   name,
+				Schema: `{"type":"object"}`,
+			})
+			if err == nil {
+				t.Fatalf("expected error for invalid schema name %q", name)
+			}
+		}
+	})
+
+	t.Run("AddSchema allows numbers in name", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		err := repo.AddSchema(ctx, Schema{
+			Name:   "person_1",
+			Schema: `{"type":"object"}`,
+		})
+		if err != nil {
+			t.Fatalf("expected name with numbers to be valid, got: %v", err)
+		}
+	})
+
+	t.Run("AddSchema fails when name exceeds 64 chars", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		err := repo.AddSchema(ctx, Schema{
+			Name:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Schema: `{"type":"object"}`,
+		})
+		if err == nil {
+			t.Fatal("expected error for too long schema name")
+		}
+	})
+
+	t.Run("AddSchema fails when schema exceeds 16KB", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		tooLarge := `{"x":"` + strings.Repeat("a", 16380) + `"}`
+		err := repo.AddSchema(ctx, Schema{
+			Name:   "large_schema",
+			Schema: tooLarge,
+		})
+		if err == nil {
+			t.Fatal("expected error for too large schema")
 		}
 	})
 
