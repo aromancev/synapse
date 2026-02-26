@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 )
 
 type Repository struct {
@@ -21,13 +20,12 @@ func (r *Repository) Init(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS nodes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	external_id TEXT NOT NULL,
-	schema TEXT NOT NULL,
+	schema_name TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
 	payload JSON NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_external_id_uq ON nodes(external_id);
-CREATE INDEX IF NOT EXISTS nodes_schema_idx ON nodes(schema);
-CREATE INDEX IF NOT EXISTS nodes_created_at_desc_idx ON nodes(created_at DESC);
+CREATE INDEX IF NOT EXISTS nodes_schema_name_created_at_desc_idx ON nodes(schema_name, created_at DESC);
 `
 
 	_, err := r.db.ExecContext(ctx, query)
@@ -36,15 +34,12 @@ CREATE INDEX IF NOT EXISTS nodes_created_at_desc_idx ON nodes(created_at DESC);
 
 func (r *Repository) AddNode(ctx context.Context, n Node) error {
 	n = n.Normalized()
-	if n.CreatedAt == 0 {
-		n.CreatedAt = time.Now().UTC().Unix()
-	}
 
 	if validationErrors := n.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
 
-	const query = `INSERT INTO nodes(external_id, schema, created_at, payload) VALUES(?, ?, ?, ?);`
+	const query = `INSERT INTO nodes(external_id, schema_name, created_at, payload) VALUES(?, ?, ?, ?);`
 	if _, err := r.db.ExecContext(ctx, query, n.ExternalID, n.Schema, n.CreatedAt, n.Payload); err != nil {
 		return fmt.Errorf("insert node: %w", err)
 	}
@@ -58,9 +53,9 @@ func (r *Repository) GetNodesBySchema(ctx context.Context, schema string, limit 
 	}
 
 	const query = `
-SELECT id, external_id, schema, created_at, payload
+SELECT id, external_id, schema_name, created_at, payload
 FROM nodes
-WHERE schema = ?
+WHERE schema_name = ?
 ORDER BY created_at DESC
 LIMIT ?;
 `

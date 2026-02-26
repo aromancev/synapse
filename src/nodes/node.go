@@ -15,11 +15,11 @@ var schemaNameRe = regexp.MustCompile(`^[a-z0-9]+(?:_[a-z0-9]+)*$`)
 
 // Node is a stored payload bound to a schema.
 type Node struct {
-	ID         int64     `json:"id"`
-	ExternalID string    `json:"external_id"`
-	Schema     string    `json:"schema"`
-	CreatedAt  int64     `json:"created_at"`
-	Payload    string    `json:"payload"`
+	ID         int64  `json:"id"`
+	ExternalID string `json:"external_id"`
+	Schema     string `json:"schema"`
+	CreatedAt  int64  `json:"created_at"`
+	Payload    string `json:"payload"`
 }
 
 // Normalized returns a normalized copy of the node.

@@ -55,25 +55,16 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddNode sets created_at when missing", func(t *testing.T) {
+	t.Run("AddNode fails when created_at is missing", func(t *testing.T) {
 		repo := newTestRepository(t)
-		ctx := context.Background()
 
-		err := repo.AddNode(ctx, Node{
+		err := repo.AddNode(context.Background(), Node{
 			ExternalID: uuid.NewString(),
 			Schema:     "person",
 			Payload:    `{"name":"Ada"}`,
 		})
-		if err != nil {
-			t.Fatalf("add node: %v", err)
-		}
-
-		nodes, err := repo.GetNodesBySchema(ctx, "person", 1)
-		if err != nil {
-			t.Fatalf("get nodes: %v", err)
-		}
-		if len(nodes) != 1 || nodes[0].CreatedAt <= 0 {
-			t.Fatalf("expected created_at to be set, got %+v", nodes)
+		if err == nil {
+			t.Fatal("expected error for missing created_at")
 		}
 	})
 
