@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/aromancev/synapse/src/links"
-	"github.com/aromancev/synapse/src/nodes"
-	"github.com/aromancev/synapse/src/schemas"
-	"github.com/aromancev/synapse/src/settings"
+	"github.com/aromancev/synapse/internal/domains/events/links"
+	"github.com/aromancev/synapse/internal/domains/events/nodes"
+	"github.com/aromancev/synapse/internal/domains/events/schemas"
+	"github.com/aromancev/synapse/internal/settings"
 	"github.com/spf13/cobra"
 )
 
