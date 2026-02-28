@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/aromancev/synapse/src/schemas"
+	"github.com/aromancev/synapse/internal/domains/events/schemas"
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 )
