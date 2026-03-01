@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -13,15 +15,11 @@ func newTestRepository(t *testing.T) *ProjectionRepository {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	require.NoError(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
 
 	repo := NewProjectionRepository(db)
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("init repo: %v", err)
-	}
+	require.NoError(t, repo.Init(context.Background()), "init repo")
 
 	return repo
 }
@@ -43,24 +41,13 @@ func TestRepository(t *testing.T) {
 				}
 			`,
 		})
-		if err != nil {
-			t.Fatalf("add schema: %v", err)
-		}
+		require.NoError(t, err, "add schema")
 
 		schemas, err := repo.GetSchemas(ctx)
-		if err != nil {
-			t.Fatalf("get schemas: %v", err)
-		}
-
-		if len(schemas) != 1 {
-			t.Fatalf("expected 1 schema, got %d", len(schemas))
-		}
-		if schemas[0].Name != "person" {
-			t.Fatalf("expected schema name %q, got %q", "person", schemas[0].Name)
-		}
-		if schemas[0].Schema != `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}` {
-			t.Fatalf("expected normalized one-line schema, got %q", schemas[0].Schema)
-		}
+		require.NoError(t, err, "get schemas")
+		require.Len(t, schemas, 1)
+		assert.Equal(t, "person", schemas[0].Name)
+		assert.Equal(t, `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`, schemas[0].Schema)
 	})
 
 	t.Run("UpsertSchema fails for empty name", func(t *testing.T) {
@@ -71,9 +58,7 @@ func TestRepository(t *testing.T) {
 			Name:   "   ",
 			Schema: `{"type":"object"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for empty schema name")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("UpsertSchema fails for invalid name format", func(t *testing.T) {
@@ -85,9 +70,7 @@ func TestRepository(t *testing.T) {
 				Name:   name,
 				Schema: `{"type":"object"}`,
 			})
-			if err == nil {
-				t.Fatalf("expected error for invalid schema name %q", name)
-			}
+			require.Error(t, err, "expected error for invalid schema name %q", name)
 		}
 	})
 
@@ -99,9 +82,7 @@ func TestRepository(t *testing.T) {
 			Name:   "person_1",
 			Schema: `{"type":"object"}`,
 		})
-		if err != nil {
-			t.Fatalf("expected name with numbers to be valid, got: %v", err)
-		}
+		require.NoError(t, err)
 	})
 
 	t.Run("UpsertSchema fails when name exceeds 64 chars", func(t *testing.T) {
@@ -112,9 +93,7 @@ func TestRepository(t *testing.T) {
 			Name:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Schema: `{"type":"object"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for too long schema name")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("UpsertSchema fails when schema exceeds 16KB", func(t *testing.T) {
@@ -126,9 +105,7 @@ func TestRepository(t *testing.T) {
 			Name:   "large_schema",
 			Schema: tooLarge,
 		})
-		if err == nil {
-			t.Fatal("expected error for too large schema")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("UpsertSchema fails for invalid json schema", func(t *testing.T) {
@@ -139,32 +116,19 @@ func TestRepository(t *testing.T) {
 			Name:   "broken",
 			Schema: `{"type":"not-a-valid-json-schema-type"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for invalid json schema")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("UpsertSchema updates existing schema by name", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		if err := repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"object"}`}); err != nil {
-			t.Fatalf("first upsert schema: %v", err)
-		}
-
-		if err := repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"string"}`}); err != nil {
-			t.Fatalf("second upsert schema: %v", err)
-		}
+		require.NoError(t, repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"object"}`}))
+		require.NoError(t, repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"string"}`}))
 
 		schemas, err := repo.GetSchemas(ctx)
-		if err != nil {
-			t.Fatalf("get schemas: %v", err)
-		}
-		if len(schemas) != 1 {
-			t.Fatalf("expected 1 schema, got %d", len(schemas))
-		}
-		if schemas[0].Schema != `{"type":"string"}` {
-			t.Fatalf("expected schema to be updated, got %q", schemas[0].Schema)
-		}
+		require.NoError(t, err)
+		require.Len(t, schemas, 1)
+		assert.Equal(t, `{"type":"string"}`, schemas[0].Schema)
 	})
 }
