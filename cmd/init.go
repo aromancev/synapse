@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	eventstore "github.com/aromancev/synapse/internal/domains/events/events"
 	"github.com/aromancev/synapse/internal/domains/events/links"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
@@ -30,6 +31,11 @@ var initCmd = &cobra.Command{
 
 		schemasRepo := schemas.NewRepository(db)
 		if err := schemasRepo.Init(context.Background()); err != nil {
+			return err
+		}
+
+		eventsRepo := eventstore.NewRepository(db)
+		if err := eventsRepo.Init(context.Background()); err != nil {
 			return err
 		}
 
