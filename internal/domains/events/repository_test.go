@@ -110,4 +110,74 @@ func TestRepository(t *testing.T) {
 			t.Fatalf("expected global position 2, got %d", events[0].GlobalPosition)
 		}
 	})
+
+	t.Run("Projection iterator advance/get/reset", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		pos, err := repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		if err != nil {
+			t.Fatalf("get empty iterator: %v", err)
+		}
+		if pos != 0 {
+			t.Fatalf("expected empty iterator to be 0, got %d", pos)
+		}
+
+		if err := repo.AdvanceProjectionIterator(ctx, "nodes_projection", "node", 5, 1700000000); err != nil {
+			t.Fatalf("advance iterator to 5: %v", err)
+		}
+		if err := repo.AdvanceProjectionIterator(ctx, "nodes_projection", "node", 3, 1700000001); err != nil {
+			t.Fatalf("advance iterator backwards should still succeed: %v", err)
+		}
+
+		pos, err = repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		if err != nil {
+			t.Fatalf("get iterator after advance: %v", err)
+		}
+		if pos != 5 {
+			t.Fatalf("expected iterator position 5, got %d", pos)
+		}
+
+		if err := repo.ResetProjectionIterator(ctx, "nodes_projection", "node", 1700000002); err != nil {
+			t.Fatalf("reset iterator: %v", err)
+		}
+		pos, err = repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		if err != nil {
+			t.Fatalf("get iterator after reset: %v", err)
+		}
+		if pos != 0 {
+			t.Fatalf("expected iterator position 0 after reset, got %d", pos)
+		}
+	})
+
+	t.Run("GetStreamTypeHeadGlobalPosition", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		head, err := repo.GetStreamTypeHeadGlobalPosition(ctx, "node")
+		if err != nil {
+			t.Fatalf("get empty head: %v", err)
+		}
+		if head != 0 {
+			t.Fatalf("expected empty head to be 0, got %d", head)
+		}
+
+		if err := repo.AppendEvent(ctx, newEvent("node:1", "node", "node.created", 1700000000), 0); err != nil {
+			t.Fatalf("append node event 1: %v", err)
+		}
+		if err := repo.AppendEvent(ctx, newEvent("schema:1", "schema", "schema.created", 1700000001), 0); err != nil {
+			t.Fatalf("append schema event: %v", err)
+		}
+		if err := repo.AppendEvent(ctx, newEvent("node:1", "node", "node.updated", 1700000002), 1); err != nil {
+			t.Fatalf("append node event 2: %v", err)
+		}
+
+		head, err = repo.GetStreamTypeHeadGlobalPosition(ctx, "node")
+		if err != nil {
+			t.Fatalf("get node head: %v", err)
+		}
+		if head != 3 {
+			t.Fatalf("expected node head global position 3, got %d", head)
+		}
+	})
 }
