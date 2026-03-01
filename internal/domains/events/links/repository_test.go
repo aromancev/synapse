@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newTestRepository(t *testing.T) *Repository {
+func newTestRepository(t *testing.T) *ProjectionRepository {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
@@ -18,7 +18,7 @@ func newTestRepository(t *testing.T) *Repository {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo := NewRepository(db)
+	repo := NewProjectionRepository(db)
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init repo: %v", err)
 	}
@@ -27,14 +27,14 @@ func newTestRepository(t *testing.T) *Repository {
 }
 
 func TestRepository(t *testing.T) {
-	t.Run("AddLink and query both directions", func(t *testing.T) {
+	t.Run("UpsertLink and query both directions", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		if err := repo.AddLink(ctx, Link{From: 1, To: 2, Weight: 0.4, CreatedAt: 1700000000}); err != nil {
+		if err := repo.UpsertLink(ctx, Link{From: 1, To: 2, Weight: 0.4, CreatedAt: 1700000000}); err != nil {
 			t.Fatalf("add link: %v", err)
 		}
-		if err := repo.AddLink(ctx, Link{From: 1, To: 3, Weight: 0.9, CreatedAt: 1700000010}); err != nil {
+		if err := repo.UpsertLink(ctx, Link{From: 1, To: 3, Weight: 0.9, CreatedAt: 1700000010}); err != nil {
 			t.Fatalf("add link: %v", err)
 		}
 
@@ -74,49 +74,72 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddLink fails for missing created_at", func(t *testing.T) {
+	t.Run("UpsertLink updates existing link", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 1, To: 2, Weight: 0.2})
+		ctx := context.Background()
+
+		if err := repo.UpsertLink(ctx, Link{From: 1, To: 2, Weight: 0.2, CreatedAt: 1700000000}); err != nil {
+			t.Fatalf("first upsert link: %v", err)
+		}
+		if err := repo.UpsertLink(ctx, Link{From: 1, To: 2, Weight: 0.8, CreatedAt: 1700000010}); err != nil {
+			t.Fatalf("second upsert link: %v", err)
+		}
+
+		links, err := repo.GetLinksFrom(ctx, []int64{1}, 10)
+		if err != nil {
+			t.Fatalf("get links from: %v", err)
+		}
+		if len(links) != 1 {
+			t.Fatalf("expected 1 link, got %d", len(links))
+		}
+		if links[0].Weight != 0.8 || links[0].CreatedAt != 1700000010 {
+			t.Fatalf("expected updated link, got %+v", links[0])
+		}
+	})
+
+	t.Run("UpsertLink fails for missing created_at", func(t *testing.T) {
+		repo := newTestRepository(t)
+		err := repo.UpsertLink(context.Background(), Link{From: 1, To: 2, Weight: 0.2})
 		if err == nil {
 			t.Fatal("expected error for missing created_at")
 		}
 	})
 
-	t.Run("AddLink fails for invalid ids", func(t *testing.T) {
+	t.Run("UpsertLink fails for invalid ids", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 0, To: -1, Weight: 0.1, CreatedAt: time.Now().Unix()})
+		err := repo.UpsertLink(context.Background(), Link{From: 0, To: -1, Weight: 0.1, CreatedAt: time.Now().Unix()})
 		if err == nil {
 			t.Fatal("expected error for invalid ids")
 		}
 	})
 
-	t.Run("AddLink fails for equal ids", func(t *testing.T) {
+	t.Run("UpsertLink fails for equal ids", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 2, To: 2, Weight: 0.1, CreatedAt: time.Now().Unix()})
+		err := repo.UpsertLink(context.Background(), Link{From: 2, To: 2, Weight: 0.1, CreatedAt: time.Now().Unix()})
 		if err == nil {
 			t.Fatal("expected error for equal ids")
 		}
 	})
 
-	t.Run("AddLink allows from greater than to", func(t *testing.T) {
+	t.Run("UpsertLink allows from greater than to", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 3, To: 2, Weight: 0.1, CreatedAt: time.Now().Unix()})
+		err := repo.UpsertLink(context.Background(), Link{From: 3, To: 2, Weight: 0.1, CreatedAt: time.Now().Unix()})
 		if err != nil {
 			t.Fatalf("expected from > to to be allowed, got: %v", err)
 		}
 	})
 
-	t.Run("AddLink fails for weight out of range", func(t *testing.T) {
+	t.Run("UpsertLink fails for weight out of range", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 1, To: 2, Weight: 1.1, CreatedAt: time.Now().Unix()})
+		err := repo.UpsertLink(context.Background(), Link{From: 1, To: 2, Weight: 1.1, CreatedAt: time.Now().Unix()})
 		if err == nil {
 			t.Fatal("expected error for weight out of range")
 		}
 	})
 
-	t.Run("AddLink fails when created_at is in the future", func(t *testing.T) {
+	t.Run("UpsertLink fails when created_at is in the future", func(t *testing.T) {
 		repo := newTestRepository(t)
-		err := repo.AddLink(context.Background(), Link{From: 1, To: 2, Weight: 0.5, CreatedAt: time.Now().Add(time.Second).Unix()})
+		err := repo.UpsertLink(context.Background(), Link{From: 1, To: 2, Weight: 0.5, CreatedAt: time.Now().Add(time.Second).Unix()})
 		if err == nil {
 			t.Fatal("expected error for future created_at")
 		}

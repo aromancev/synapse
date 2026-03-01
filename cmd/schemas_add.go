@@ -43,8 +43,8 @@ var schemasAddCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		repo := schemas.NewRepository(db)
-		if err := repo.AddSchema(context.Background(), schemas.Schema{
+		repo := schemas.NewProjectionRepository(db)
+		if err := repo.UpsertSchema(context.Background(), schemas.Schema{
 			Name:   addSchemaName,
 			Schema: schemaJSON,
 		}); err != nil {

@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newTestRepository(t *testing.T) *Repository {
+func newTestRepository(t *testing.T) *ProjectionRepository {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
@@ -18,7 +18,7 @@ func newTestRepository(t *testing.T) *Repository {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	repo := NewRepository(db)
+	repo := NewProjectionRepository(db)
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init repo: %v", err)
 	}
@@ -27,11 +27,11 @@ func newTestRepository(t *testing.T) *Repository {
 }
 
 func TestRepository(t *testing.T) {
-	t.Run("AddSchema and GetSchemas", func(t *testing.T) {
+	t.Run("UpsertSchema and GetSchemas", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name: "  person  ",
 			Schema: `
 				{
@@ -63,11 +63,11 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails for empty name", func(t *testing.T) {
+	t.Run("UpsertSchema fails for empty name", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name:   "   ",
 			Schema: `{"type":"object"}`,
 		})
@@ -76,12 +76,12 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails for invalid name format", func(t *testing.T) {
+	t.Run("UpsertSchema fails for invalid name format", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
 		for _, name := range []string{"Person", "person-name", "имя"} {
-			err := repo.AddSchema(ctx, Schema{
+			err := repo.UpsertSchema(ctx, Schema{
 				Name:   name,
 				Schema: `{"type":"object"}`,
 			})
@@ -91,11 +91,11 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema allows numbers in name", func(t *testing.T) {
+	t.Run("UpsertSchema allows numbers in name", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name:   "person_1",
 			Schema: `{"type":"object"}`,
 		})
@@ -104,11 +104,11 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails when name exceeds 64 chars", func(t *testing.T) {
+	t.Run("UpsertSchema fails when name exceeds 64 chars", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Schema: `{"type":"object"}`,
 		})
@@ -117,12 +117,12 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails when schema exceeds 16KB", func(t *testing.T) {
+	t.Run("UpsertSchema fails when schema exceeds 16KB", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
 		tooLarge := `{"x":"` + strings.Repeat("a", 16380) + `"}`
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name:   "large_schema",
 			Schema: tooLarge,
 		})
@@ -131,11 +131,11 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails for invalid json schema", func(t *testing.T) {
+	t.Run("UpsertSchema fails for invalid json schema", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		err := repo.AddSchema(ctx, Schema{
+		err := repo.UpsertSchema(ctx, Schema{
 			Name:   "broken",
 			Schema: `{"type":"not-a-valid-json-schema-type"}`,
 		})
@@ -144,19 +144,27 @@ func TestRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("AddSchema fails for duplicate name", func(t *testing.T) {
+	t.Run("UpsertSchema updates existing schema by name", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		validSchema := `{"type":"object"}`
-
-		if err := repo.AddSchema(ctx, Schema{Name: "entity", Schema: validSchema}); err != nil {
-			t.Fatalf("first add schema: %v", err)
+		if err := repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"object"}`}); err != nil {
+			t.Fatalf("first upsert schema: %v", err)
 		}
 
-		err := repo.AddSchema(ctx, Schema{Name: "entity", Schema: validSchema})
-		if err == nil {
-			t.Fatal("expected unique constraint error for duplicate name")
+		if err := repo.UpsertSchema(ctx, Schema{Name: "entity", Schema: `{"type":"string"}`}); err != nil {
+			t.Fatalf("second upsert schema: %v", err)
+		}
+
+		schemas, err := repo.GetSchemas(ctx)
+		if err != nil {
+			t.Fatalf("get schemas: %v", err)
+		}
+		if len(schemas) != 1 {
+			t.Fatalf("expected 1 schema, got %d", len(schemas))
+		}
+		if schemas[0].Schema != `{"type":"string"}` {
+			t.Fatalf("expected schema to be updated, got %q", schemas[0].Schema)
 		}
 	})
 }

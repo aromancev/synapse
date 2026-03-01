@@ -7,15 +7,15 @@ import (
 	"fmt"
 )
 
-type Repository struct {
+type ProjectionRepository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func NewProjectionRepository(db *sql.DB) *ProjectionRepository {
+	return &ProjectionRepository{db: db}
 }
 
-func (r *Repository) Init(ctx context.Context) error {
+func (r *ProjectionRepository) Init(ctx context.Context) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS schemas (
 	name TEXT NOT NULL,
@@ -28,22 +28,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS schemas_name_uq ON schemas(name);
 	return err
 }
 
-func (r *Repository) AddSchema(ctx context.Context, s Schema) error {
+func (r *ProjectionRepository) UpsertSchema(ctx context.Context, s Schema) error {
 	s = s.Normalized()
 
 	if validationErrors := s.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
 
-	const query = `INSERT INTO schemas(name, schema) VALUES(?, ?);`
+	const query = `
+INSERT INTO schemas(name, schema)
+VALUES(?, ?)
+ON CONFLICT(name) DO UPDATE SET
+	schema = excluded.schema;
+`
 	if _, err := r.db.ExecContext(ctx, query, s.Name, s.Schema); err != nil {
-		return fmt.Errorf("insert schema: %w", err)
+		return fmt.Errorf("upsert schema: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) GetSchemas(ctx context.Context) ([]Schema, error) {
+func (r *ProjectionRepository) GetSchemas(ctx context.Context) ([]Schema, error) {
 	const query = `SELECT name, schema FROM schemas ORDER BY name;`
 
 	rows, err := r.db.QueryContext(ctx, query)

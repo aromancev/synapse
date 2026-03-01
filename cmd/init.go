@@ -29,7 +29,7 @@ var initCmd = &cobra.Command{
 			return err
 		}
 
-		schemasRepo := schemas.NewRepository(db)
+		schemasRepo := schemas.NewProjectionRepository(db)
 		if err := schemasRepo.Init(context.Background()); err != nil {
 			return err
 		}
@@ -44,7 +44,7 @@ var initCmd = &cobra.Command{
 			return err
 		}
 
-		linksRepo := links.NewRepository(db)
+		linksRepo := links.NewProjectionRepository(db)
 		if err := linksRepo.Init(context.Background()); err != nil {
 			return err
 		}
