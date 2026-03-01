@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,15 +17,11 @@ func newTestRepository(t *testing.T) *Repository {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	require.NoError(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
 
 	repo := NewRepository(db)
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("init repo: %v", err)
-	}
+	require.NoError(t, repo.Init(context.Background()), "init repo")
 
 	return repo
 }
@@ -39,20 +37,12 @@ func TestRepository(t *testing.T) {
 			CreatedAt:  1700000000,
 			Payload:    ` { "name": "Ada" } `,
 		})
-		if err != nil {
-			t.Fatalf("add node: %v", err)
-		}
+		require.NoError(t, err)
 
 		nodes, err := repo.GetNodesBySchema(ctx, "person", 10)
-		if err != nil {
-			t.Fatalf("get nodes: %v", err)
-		}
-		if len(nodes) != 1 {
-			t.Fatalf("expected 1 node, got %d", len(nodes))
-		}
-		if nodes[0].Payload != `{"name":"Ada"}` {
-			t.Fatalf("expected normalized payload, got %q", nodes[0].Payload)
-		}
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, `{"name":"Ada"}`, nodes[0].Payload)
 	})
 
 	t.Run("AddNode fails when created_at is missing", func(t *testing.T) {
@@ -63,9 +53,7 @@ func TestRepository(t *testing.T) {
 			Schema:     "person",
 			Payload:    `{"name":"Ada"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for missing created_at")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("AddNode fails for invalid external_id", func(t *testing.T) {
@@ -76,9 +64,7 @@ func TestRepository(t *testing.T) {
 			CreatedAt:  time.Now().Unix(),
 			Payload:    `{"name":"Ada"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for invalid external_id")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("AddNode fails for invalid schema name", func(t *testing.T) {
@@ -89,9 +75,7 @@ func TestRepository(t *testing.T) {
 			CreatedAt:  time.Now().Unix(),
 			Payload:    `{"name":"Ada"}`,
 		})
-		if err == nil {
-			t.Fatal("expected error for invalid schema")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("AddNode fails for oversized payload", func(t *testing.T) {
@@ -103,9 +87,7 @@ func TestRepository(t *testing.T) {
 			CreatedAt:  time.Now().Unix(),
 			Payload:    over,
 		})
-		if err == nil {
-			t.Fatal("expected error for oversized payload")
-		}
+		require.Error(t, err)
 	})
 
 	t.Run("AddNode fails for duplicate external_id", func(t *testing.T) {
@@ -114,11 +96,7 @@ func TestRepository(t *testing.T) {
 		externalID := uuid.NewString()
 
 		node := Node{ExternalID: externalID, Schema: "person", CreatedAt: time.Now().Unix(), Payload: `{"name":"Ada"}`}
-		if err := repo.AddNode(ctx, node); err != nil {
-			t.Fatalf("first add node: %v", err)
-		}
-		if err := repo.AddNode(ctx, node); err == nil {
-			t.Fatal("expected unique constraint error for duplicate external_id")
-		}
+		require.NoError(t, repo.AddNode(ctx, node))
+		require.Error(t, repo.AddNode(ctx, node))
 	})
 }
