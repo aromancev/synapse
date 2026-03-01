@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-type Repository struct {
+type ProjectionRepository struct {
 	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func NewProjectionRepository(db *sql.DB) *ProjectionRepository {
+	return &ProjectionRepository{db: db}
 }
 
-func (r *Repository) Init(ctx context.Context) error {
+func (r *ProjectionRepository) Init(ctx context.Context) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS links (
 	"from" INTEGER NOT NULL,
@@ -33,20 +33,26 @@ CREATE INDEX IF NOT EXISTS links_created_at_desc_idx ON links(created_at DESC);
 	return err
 }
 
-func (r *Repository) AddLink(ctx context.Context, l Link) error {
+func (r *ProjectionRepository) UpsertLink(ctx context.Context, l Link) error {
 	if validationErrors := l.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
 
-	const query = `INSERT INTO links("from", "to", weight, created_at) VALUES(?, ?, ?, ?);`
+	const query = `
+INSERT INTO links("from", "to", weight, created_at)
+VALUES(?, ?, ?, ?)
+ON CONFLICT("from", "to") DO UPDATE SET
+	weight = excluded.weight,
+	created_at = excluded.created_at;
+`
 	if _, err := r.db.ExecContext(ctx, query, l.From, l.To, l.Weight, l.CreatedAt); err != nil {
-		return fmt.Errorf("insert link: %w", err)
+		return fmt.Errorf("upsert link: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) GetLinksFrom(ctx context.Context, fromIDs []int64, limit int) ([]Link, error) {
+func (r *ProjectionRepository) GetLinksFrom(ctx context.Context, fromIDs []int64, limit int) ([]Link, error) {
 	if len(fromIDs) == 0 {
 		return nil, nil
 	}
@@ -91,7 +97,7 @@ LIMIT ?;
 	return out, nil
 }
 
-func (r *Repository) GetLinksTo(ctx context.Context, toIDs []int64, limit int) ([]Link, error) {
+func (r *ProjectionRepository) GetLinksTo(ctx context.Context, toIDs []int64, limit int) ([]Link, error) {
 	if len(toIDs) == 0 {
 		return nil, nil
 	}
