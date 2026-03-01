@@ -9,11 +9,16 @@ import (
 
 var ErrConcurrencyConflict = errors.New("concurrency conflict")
 
-type Repository struct {
-	db *sql.DB
+type DB interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func NewRepository(db *sql.DB) *Repository {
+type Repository struct {
+	db DB
+}
+
+func NewRepository(db DB) *Repository {
 	return &Repository{db: db}
 }
 
@@ -53,36 +58,29 @@ func (r *Repository) AppendEvent(ctx context.Context, e Event, expectedStreamVer
 		return errors.Join(validationErrors...)
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	var currentVersion int64
-	const currentVersionQuery = `SELECT COALESCE(MAX(stream_version), 0) FROM events WHERE stream_id = ?;`
-	if err := tx.QueryRowContext(ctx, currentVersionQuery, e.StreamID).Scan(&currentVersion); err != nil {
-		return fmt.Errorf("get current stream version: %w", err)
-	}
-
-	if currentVersion != expectedStreamVersion {
-		return fmt.Errorf("%w: stream_id=%q expected=%d actual=%d", ErrConcurrencyConflict, e.StreamID, expectedStreamVersion, currentVersion)
-	}
-
 	const insertQuery = `
 INSERT INTO events(
 	id, stream_id, stream_type, stream_version, event_type, event_version,
 	occurred_at, recorded_at, payload, meta
-) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
-	if _, err := tx.ExecContext(ctx, insertQuery,
+)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE (SELECT COALESCE(MAX(stream_version), 0) FROM events WHERE stream_id = ?) = ?;`
+
+	res, err := r.db.ExecContext(ctx, insertQuery,
 		e.ID, e.StreamID, e.StreamType, e.StreamVersion, e.EventType, e.EventVersion,
 		e.OccurredAt, e.RecordedAt, e.Payload, e.Meta,
-	); err != nil {
+		e.StreamID, expectedStreamVersion,
+	)
+	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: stream_id=%q expected=%d", ErrConcurrencyConflict, e.StreamID, expectedStreamVersion)
 	}
 
 	return nil

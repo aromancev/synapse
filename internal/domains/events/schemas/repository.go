@@ -7,11 +7,16 @@ import (
 	"fmt"
 )
 
-type ProjectionRepository struct {
-	db *sql.DB
+type DB interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func NewProjectionRepository(db *sql.DB) *ProjectionRepository {
+type ProjectionRepository struct {
+	db DB
+}
+
+func NewProjectionRepository(db DB) *ProjectionRepository {
 	return &ProjectionRepository{db: db}
 }
 

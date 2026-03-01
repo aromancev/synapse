@@ -7,11 +7,16 @@ import (
 	"fmt"
 )
 
-type Repository struct {
-	db *sql.DB
+type DB interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func NewRepository(db *sql.DB) *Repository {
+type Repository struct {
+	db DB
+}
+
+func NewRepository(db DB) *Repository {
 	return &Repository{db: db}
 }
 
