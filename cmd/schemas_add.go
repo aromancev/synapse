@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"os"
 
-	"github.com/aromancev/synapse/internal/domains/events/schemas"
+	"github.com/aromancev/synapse/internal/services/synapse"
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 )
@@ -43,11 +42,8 @@ var schemasAddCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		repo := schemas.NewProjectionRepository(db)
-		if err := repo.UpsertSchema(context.Background(), schemas.Schema{
-			Name:   addSchemaName,
-			Schema: schemaJSON,
-		}); err != nil {
+		service := synapse.NewSynapse(db)
+		if err := service.AddSchema(cmd.Context(), addSchemaName, schemaJSON); err != nil {
 			return err
 		}
 
