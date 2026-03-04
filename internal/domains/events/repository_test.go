@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,15 +17,11 @@ func newTestRepository(t *testing.T) *Repository {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	require.NoError(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
 
 	repo := NewRepository(db)
-	if err := repo.Init(context.Background()); err != nil {
-		t.Fatalf("init repo: %v", err)
-	}
+	require.NoError(t, repo.Init(context.Background()), "init repo")
 
 	return repo
 }
@@ -48,25 +46,16 @@ func TestRepository(t *testing.T) {
 		ctx := context.Background()
 
 		e1 := newEvent("node:1", "node", "node.created", 1700000000)
-		if err := repo.AppendEvent(ctx, e1, 0); err != nil {
-			t.Fatalf("append e1: %v", err)
-		}
+		require.NoError(t, repo.AppendEvent(ctx, e1, 0))
 
 		e2 := newEvent("node:1", "node", "node.renamed", 1700000001)
-		if err := repo.AppendEvent(ctx, e2, 1); err != nil {
-			t.Fatalf("append e2: %v", err)
-		}
+		require.NoError(t, repo.AppendEvent(ctx, e2, 1))
 
 		events, err := repo.GetEventsByStream(ctx, "node:1", 0)
-		if err != nil {
-			t.Fatalf("get by stream: %v", err)
-		}
-		if len(events) != 2 {
-			t.Fatalf("expected 2 events, got %d", len(events))
-		}
-		if events[0].StreamVersion != 1 || events[1].StreamVersion != 2 {
-			t.Fatalf("unexpected stream versions: %d, %d", events[0].StreamVersion, events[1].StreamVersion)
-		}
+		require.NoError(t, err)
+		require.Len(t, events, 2)
+		assert.Equal(t, int64(1), events[0].StreamVersion)
+		assert.Equal(t, int64(2), events[1].StreamVersion)
 	})
 
 	t.Run("AppendEvent fails on concurrency conflict", func(t *testing.T) {
@@ -74,40 +63,62 @@ func TestRepository(t *testing.T) {
 		ctx := context.Background()
 
 		e := newEvent("schema:person", "schema", "schema.registered", time.Now().Unix())
-		if err := repo.AppendEvent(ctx, e, 0); err != nil {
-			t.Fatalf("append e: %v", err)
-		}
+		require.NoError(t, repo.AppendEvent(ctx, e, 0))
 
 		e2 := newEvent("schema:person", "schema", "schema.updated", time.Now().Unix())
 		err := repo.AppendEvent(ctx, e2, 0)
-		if err == nil {
-			t.Fatal("expected concurrency conflict")
-		}
-		if !errors.Is(err, ErrConcurrencyConflict) {
-			t.Fatalf("expected ErrConcurrencyConflict, got: %v", err)
-		}
+		require.Error(t, err)
+		require.True(t, errors.Is(err, ErrConcurrencyConflict), "expected ErrConcurrencyConflict, got: %v", err)
 	})
 
 	t.Run("GetEventsFromGlobalPosition", func(t *testing.T) {
 		repo := newTestRepository(t)
 		ctx := context.Background()
 
-		if err := repo.AppendEvent(ctx, newEvent("node:1", "node", "node.created", 1700000000), 0); err != nil {
-			t.Fatalf("append first event: %v", err)
-		}
-		if err := repo.AppendEvent(ctx, newEvent("node:2", "node", "node.created", 1700000001), 0); err != nil {
-			t.Fatalf("append second event: %v", err)
-		}
+		require.NoError(t, repo.AppendEvent(ctx, newEvent("node:1", "node", "node.created", 1700000000), 0))
+		require.NoError(t, repo.AppendEvent(ctx, newEvent("node:2", "node", "node.created", 1700000001), 0))
 
 		events, err := repo.GetEventsFromGlobalPosition(ctx, 1)
-		if err != nil {
-			t.Fatalf("get from global position: %v", err)
-		}
-		if len(events) != 1 {
-			t.Fatalf("expected 1 event, got %d", len(events))
-		}
-		if events[0].GlobalPosition != 2 {
-			t.Fatalf("expected global position 2, got %d", events[0].GlobalPosition)
-		}
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		assert.Equal(t, int64(2), events[0].GlobalPosition)
+	})
+
+	t.Run("Projection iterator advance/get/reset", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		pos, err := repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), pos)
+
+		require.NoError(t, repo.AdvanceProjectionIterator(ctx, "nodes_projection", "node", 5, 1700000000))
+		require.NoError(t, repo.AdvanceProjectionIterator(ctx, "nodes_projection", "node", 3, 1700000001))
+
+		pos, err = repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), pos)
+
+		require.NoError(t, repo.ResetProjectionIterator(ctx, "nodes_projection", "node", 1700000002))
+		pos, err = repo.GetProjectionIterator(ctx, "nodes_projection", "node")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), pos)
+	})
+
+	t.Run("GetStreamTypeHeadGlobalPosition", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := context.Background()
+
+		head, err := repo.GetStreamTypeHeadGlobalPosition(ctx, "node")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), head)
+
+		require.NoError(t, repo.AppendEvent(ctx, newEvent("node:1", "node", "node.created", 1700000000), 0))
+		require.NoError(t, repo.AppendEvent(ctx, newEvent("schema:1", "schema", "schema.created", 1700000001), 0))
+		require.NoError(t, repo.AppendEvent(ctx, newEvent("node:1", "node", "node.updated", 1700000002), 1))
+
+		head, err = repo.GetStreamTypeHeadGlobalPosition(ctx, "node")
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), head)
 	})
 }

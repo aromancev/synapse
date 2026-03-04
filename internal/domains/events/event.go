@@ -16,6 +16,33 @@ var (
 	eventTypeRe  = regexp.MustCompile(`^[a-z0-9]+(?:[._][a-z0-9]+)*$`)
 )
 
+// Request is a lightweight event request without operational fields.
+// The caller provides semantics; Stream.Record fills in operational fields.
+type Request struct {
+	EventType    string `json:"event_type"`
+	EventVersion int64  `json:"event_version"`
+	OccurredAt   int64  `json:"occurred_at"`
+	Payload      any    `json:"payload"`
+	Meta         any    `json:"meta"`
+}
+
+// Validate checks whether Request is valid.
+func (r Request) Validate() error {
+	if r.EventType == "" {
+		return errors.New("event_type is required")
+	}
+	if r.EventVersion <= 0 {
+		return errors.New("event_version must be > 0")
+	}
+	if r.OccurredAt <= 0 {
+		return errors.New("occurred_at is required")
+	}
+	if r.Payload == nil {
+		return errors.New("payload is required")
+	}
+	return nil
+}
+
 // Event is a single immutable domain event.
 type Event struct {
 	GlobalPosition int64  `json:"global_position"`
