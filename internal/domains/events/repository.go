@@ -27,7 +27,7 @@ func (r *Repository) Init(ctx context.Context) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS events (
 	global_position INTEGER PRIMARY KEY AUTOINCREMENT,
-	id TEXT NOT NULL,
+	id BLOB NOT NULL,
 	stream_id TEXT NOT NULL,
 	stream_type TEXT NOT NULL,
 	stream_version INTEGER NOT NULL,
@@ -77,9 +77,9 @@ SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 WHERE (SELECT COALESCE(MAX(stream_version), 0) FROM events WHERE stream_id = ?) = ?;`
 
 	res, err := r.db.ExecContext(ctx, insertQuery,
-		e.ID, e.StreamID, e.StreamType, e.StreamVersion, e.EventType, e.EventVersion,
+		e.ID, e.StreamID.String(), e.StreamType.String(), e.StreamVersion, e.EventType.String(), e.EventVersion,
 		e.OccurredAt, e.RecordedAt, e.Payload, e.Meta,
-		e.StreamID, expectedStreamVersion,
+		e.StreamID.String(), expectedStreamVersion,
 	)
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
@@ -96,7 +96,8 @@ WHERE (SELECT COALESCE(MAX(stream_version), 0) FROM events WHERE stream_id = ?) 
 	return nil
 }
 
-func (r *Repository) GetEventsByStream(ctx context.Context, streamID string, fromVersion int64) ([]Event, error) {
+func (r *Repository) GetEventsByStream(ctx context.Context, streamID StreamID, fromVersion int64) ([]Event, error) {
+	streamID = streamID.Normalized()
 	if streamID == "" {
 		return nil, errors.New("stream_id is required")
 	}
@@ -112,7 +113,7 @@ WHERE stream_id = ? AND stream_version > ?
 ORDER BY stream_version ASC;
 `
 
-	rows, err := r.db.QueryContext(ctx, query, streamID, fromVersion)
+	rows, err := r.db.QueryContext(ctx, query, streamID.String(), fromVersion)
 	if err != nil {
 		return nil, fmt.Errorf("query events by stream: %w", err)
 	}
@@ -193,10 +194,11 @@ ORDER BY global_position ASC;
 	return out, nil
 }
 
-func (r *Repository) GetProjectionIterator(ctx context.Context, projectionName, streamType string) (int64, error) {
+func (r *Repository) GetProjectionIterator(ctx context.Context, projectionName string, streamType StreamType) (int64, error) {
 	if projectionName == "" {
 		return 0, errors.New("projection_name is required")
 	}
+	streamType = streamType.Normalized()
 	if streamType == "" {
 		return 0, errors.New("stream_type is required")
 	}
@@ -208,7 +210,7 @@ WHERE projection_name = ? AND stream_type = ?;
 `
 
 	var position int64
-	err := r.db.QueryRowContext(ctx, query, projectionName, streamType).Scan(&position)
+	err := r.db.QueryRowContext(ctx, query, projectionName, streamType.String()).Scan(&position)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
@@ -219,10 +221,11 @@ WHERE projection_name = ? AND stream_type = ?;
 	return position, nil
 }
 
-func (r *Repository) AdvanceProjectionIterator(ctx context.Context, projectionName, streamType string, toGlobalPosition int64, updatedAt int64) error {
+func (r *Repository) AdvanceProjectionIterator(ctx context.Context, projectionName string, streamType StreamType, toGlobalPosition int64, updatedAt int64) error {
 	if projectionName == "" {
 		return errors.New("projection_name is required")
 	}
+	streamType = streamType.Normalized()
 	if streamType == "" {
 		return errors.New("stream_type is required")
 	}
@@ -238,17 +241,18 @@ ON CONFLICT(projection_name, stream_type) DO UPDATE SET
 	updated_at = excluded.updated_at;
 `
 
-	if _, err := r.db.ExecContext(ctx, query, projectionName, streamType, toGlobalPosition, updatedAt); err != nil {
+	if _, err := r.db.ExecContext(ctx, query, projectionName, streamType.String(), toGlobalPosition, updatedAt); err != nil {
 		return fmt.Errorf("advance projection iterator: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) ResetProjectionIterator(ctx context.Context, projectionName, streamType string, updatedAt int64) error {
+func (r *Repository) ResetProjectionIterator(ctx context.Context, projectionName string, streamType StreamType, updatedAt int64) error {
 	if projectionName == "" {
 		return errors.New("projection_name is required")
 	}
+	streamType = streamType.Normalized()
 	if streamType == "" {
 		return errors.New("stream_type is required")
 	}
@@ -261,14 +265,15 @@ ON CONFLICT(projection_name, stream_type) DO UPDATE SET
 	updated_at = excluded.updated_at;
 `
 
-	if _, err := r.db.ExecContext(ctx, query, projectionName, streamType, updatedAt); err != nil {
+	if _, err := r.db.ExecContext(ctx, query, projectionName, streamType.String(), updatedAt); err != nil {
 		return fmt.Errorf("reset projection iterator: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) GetStreamTypeHeadGlobalPosition(ctx context.Context, streamType string) (int64, error) {
+func (r *Repository) GetStreamTypeHeadGlobalPosition(ctx context.Context, streamType StreamType) (int64, error) {
+	streamType = streamType.Normalized()
 	if streamType == "" {
 		return 0, errors.New("stream_type is required")
 	}
@@ -276,7 +281,7 @@ func (r *Repository) GetStreamTypeHeadGlobalPosition(ctx context.Context, stream
 	const query = `SELECT COALESCE(MAX(global_position), 0) FROM events WHERE stream_type = ?;`
 
 	var head int64
-	if err := r.db.QueryRowContext(ctx, query, streamType).Scan(&head); err != nil {
+	if err := r.db.QueryRowContext(ctx, query, streamType.String()).Scan(&head); err != nil {
 		return 0, fmt.Errorf("get stream type head global position: %w", err)
 	}
 

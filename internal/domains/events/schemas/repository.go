@@ -23,9 +23,11 @@ func NewProjectionRepository(db DB) *ProjectionRepository {
 func (r *ProjectionRepository) Init(ctx context.Context) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS schemas (
+	id BLOB NOT NULL,
 	name TEXT NOT NULL,
 	schema JSON NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS schemas_id_uq ON schemas(id);
 CREATE UNIQUE INDEX IF NOT EXISTS schemas_name_uq ON schemas(name);
 `
 
@@ -41,12 +43,13 @@ func (r *ProjectionRepository) UpsertSchema(ctx context.Context, s Schema) error
 	}
 
 	const query = `
-INSERT INTO schemas(name, schema)
-VALUES(?, ?)
+INSERT INTO schemas(id, name, schema)
+VALUES(?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET
+	id = excluded.id,
 	schema = excluded.schema;
 `
-	if _, err := r.db.ExecContext(ctx, query, s.Name, s.Schema); err != nil {
+	if _, err := r.db.ExecContext(ctx, query, s.ID, s.Name, s.Schema); err != nil {
 		return fmt.Errorf("upsert schema: %w", err)
 	}
 
@@ -54,7 +57,7 @@ ON CONFLICT(name) DO UPDATE SET
 }
 
 func (r *ProjectionRepository) GetSchemas(ctx context.Context) ([]Schema, error) {
-	const query = `SELECT name, schema FROM schemas ORDER BY name;`
+	const query = `SELECT id, name, schema FROM schemas ORDER BY name;`
 
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -65,7 +68,7 @@ func (r *ProjectionRepository) GetSchemas(ctx context.Context) ([]Schema, error)
 	var schemas []Schema
 	for rows.Next() {
 		var s Schema
-		if err := rows.Scan(&s.Name, &s.Schema); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Schema); err != nil {
 			return nil, fmt.Errorf("scan schema: %w", err)
 		}
 		schemas = append(schemas, s)
