@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/aromancev/synapse/internal/domains/events"
@@ -33,20 +34,22 @@ func TestSynapse_AddSchema(t *testing.T) {
 		err := svc.AddSchema(context.Background(), "  person  ", " { \"type\": \"object\" } ")
 		require.NoError(t, err)
 
-		eventsInStream, err := eventsRepo.GetEventsByStream(context.Background(), "schema:person", 0)
+		eventsInStream, err := eventsRepo.GetEventsFromGlobalPosition(context.Background(), 0)
 		require.NoError(t, err)
 		require.Len(t, eventsInStream, 1)
 
 		e := eventsInStream[0]
-		assert.Equal(t, "schema:person", e.StreamID)
+		assert.True(t, strings.HasPrefix(e.StreamID.String(), "schema_"))
 		assert.Equal(t, StreamType, e.StreamType)
 		assert.Equal(t, EventTypeSchemaAdded, e.EventType)
 		assert.Equal(t, int64(1), e.StreamVersion)
+		assert.True(t, strings.HasPrefix(e.ID.String(), "event_"))
 
 		var payload schemas.Schema
-		require.NoError(t, json.Unmarshal([]byte(e.Payload), &payload))
+		require.NoError(t, json.Unmarshal(e.Payload, &payload))
+		assert.True(t, strings.HasPrefix(payload.ID.String(), "schema_"))
 		assert.Equal(t, "person", payload.Name)
-		assert.Equal(t, `{"type":"object"}`, payload.Schema)
+		assert.Equal(t, json.RawMessage(`{"type":"object"}`), payload.Schema)
 	})
 
 	t.Run("fails on invalid schema", func(t *testing.T) {
@@ -55,7 +58,7 @@ func TestSynapse_AddSchema(t *testing.T) {
 		err := svc.AddSchema(context.Background(), "Bad-Name", `{"type":"object"}`)
 		require.Error(t, err)
 
-		eventsInStream, streamErr := eventsRepo.GetEventsByStream(context.Background(), "schema:Bad-Name", 0)
+		eventsInStream, streamErr := eventsRepo.GetEventsFromGlobalPosition(context.Background(), 0)
 		require.NoError(t, streamErr)
 		assert.Len(t, eventsInStream, 0)
 	})

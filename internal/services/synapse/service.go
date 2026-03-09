@@ -3,6 +3,7 @@ package synapse
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	StreamType           = "schema"
-	EventTypeSchemaAdded = "schema.added"
+	StreamType           events.StreamType = "schema"
+	EventTypeSchemaAdded events.EventType  = schemas.EventTypeSchemaAdded
 )
 
 type Synapse struct {
@@ -25,7 +26,12 @@ func NewSynapse(db *sql.DB) *Synapse {
 }
 
 func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error {
-	schema := schemas.Schema{Name: name, Schema: schemaJSON}.Normalized()
+	schemaID, err := schemas.NewID()
+	if err != nil {
+		return fmt.Errorf("new schema id: %w", err)
+	}
+
+	schema := schemas.Schema{ID: schemaID, Name: name, Schema: json.RawMessage(schemaJSON)}.Normalized()
 	if validationErrors := schema.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -38,7 +44,7 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 
 	eventsRepo := events.NewRepository(tx)
 
-	streamID := schemaStreamID(schema.Name)
+	streamID := schemaStreamID(schema.ID)
 	streamEvents, err := eventsRepo.GetEventsByStream(ctx, streamID, 0)
 	if err != nil {
 		return fmt.Errorf("get schema stream events: %w", err)
@@ -68,6 +74,6 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	return nil
 }
 
-func schemaStreamID(schemaName string) string {
-	return "schema:" + schemaName
+func schemaStreamID(schemaID schemas.ID) events.StreamID {
+	return events.StreamID(schemaID.String())
 }
