@@ -44,7 +44,7 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 
 	eventsRepo := events.NewRepository(tx)
 
-	streamID := schemaStreamID(schema.ID)
+	streamID := events.StreamID(schema.ID.String())
 	streamEvents, err := eventsRepo.GetEventsByStream(ctx, streamID, 0)
 	if err != nil {
 		return fmt.Errorf("get schema stream events: %w", err)
@@ -72,8 +72,4 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	}
 
 	return nil
-}
-
-func schemaStreamID(schemaID schemas.ID) events.StreamID {
-	return events.StreamID(schemaID.String())
 }
