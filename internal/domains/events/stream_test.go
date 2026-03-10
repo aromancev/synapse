@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -69,7 +70,7 @@ func TestStream(t *testing.T) {
 		var received []Event
 		agg := &testAggregate{received: &received}
 
-		err = stream.Init(agg)
+		err = stream.Init(context.Background(), agg)
 		require.NoError(t, err)
 		require.Len(t, received, 2)
 		assert.Equal(t, EventType("init"), received[0].EventType)
@@ -80,15 +81,19 @@ func TestStream(t *testing.T) {
 		eventID, err := NewEventID()
 		require.NoError(t, err)
 		stream := NewStream(StreamID("s1"), StreamType("test"), []Event{{ID: eventID, StreamID: StreamID("s1"), StreamType: StreamType("test"), StreamVersion: 1, EventType: EventType("init"), EventVersion: 1, OccurredAt: 1, RecordedAt: 1, Payload: json.RawMessage(`{"v":1}`), Meta: json.RawMessage(`{}`)}})
-		err = stream.Init(failingAggregate{})
+		err = stream.Init(context.Background(), failingAggregate{})
 		require.EqualError(t, err, "boom")
 	})
 }
 
 type testAggregate struct{ received *[]Event }
 
-func (a *testAggregate) Apply(e Event) error { *a.received = append(*a.received, e); return nil }
+func (a *testAggregate) Apply(ctx context.Context, e Event) error {
+	_ = ctx
+	*a.received = append(*a.received, e)
+	return nil
+}
 
 type failingAggregate struct{}
 
-func (failingAggregate) Apply(Event) error { return errors.New("boom") }
+func (failingAggregate) Apply(context.Context, Event) error { return errors.New("boom") }

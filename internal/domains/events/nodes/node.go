@@ -6,16 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/oklog/ulid/v2"
 )
 
 const idPrefix = "node_"
-
-var schemaNameRe = regexp.MustCompile(`^[a-z0-9]+(?:_[a-z0-9]+)*$`)
 
 // ID is a prefixed ULID-backed node identifier.
 type ID ulid.ULID
@@ -79,18 +77,18 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Node is a stored payload bound to a schema.
+// Node is a stored payload bound to a schema stream.
 type Node struct {
-	ID         int64           `json:"id"`
-	UID        ID              `json:"uid"`
-	SchemaName string          `json:"schema_name"`
-	CreatedAt  int64           `json:"created_at"`
-	Payload    json.RawMessage `json:"payload"`
+	ID        int64           `json:"id"`
+	UID       ID              `json:"uid"`
+	SchemaID  events.StreamID `json:"schema_id"`
+	CreatedAt int64           `json:"created_at"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 // Normalized returns a normalized copy of the node.
 func (n Node) Normalized() Node {
-	n.SchemaName = strings.TrimSpace(n.SchemaName)
+	n.SchemaID = n.SchemaID.Normalized()
 	n.Payload = json.RawMessage(strings.TrimSpace(string(n.Payload)))
 
 	var compact bytes.Buffer
@@ -110,15 +108,8 @@ func (n Node) Validate() []error {
 		errs = append(errs, errors.New("uid is required"))
 	}
 
-	if n.SchemaName == "" {
-		errs = append(errs, errors.New("schema_name is required"))
-	} else {
-		if len(n.SchemaName) > 64 {
-			errs = append(errs, errors.New("schema_name must not exceed 64 characters"))
-		}
-		if !schemaNameRe.MatchString(n.SchemaName) {
-			errs = append(errs, errors.New("schema_name must be snake_case with lowercase latin letters and numbers only"))
-		}
+	if err := n.SchemaID.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("schema_id: %w", err))
 	}
 
 	if n.CreatedAt <= 0 {

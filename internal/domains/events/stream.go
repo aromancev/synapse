@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -72,7 +73,7 @@ func (t StreamType) Validate() error {
 
 // Aggregate consumes ordered events from a stream.
 type Aggregate interface {
-	Apply(event Event) error
+	Apply(ctx context.Context, event Event) error
 }
 
 // Stream is a handle for aggregate stream events.
@@ -101,9 +102,9 @@ func NewStream(streamID StreamID, streamType StreamType, events []Event) *Stream
 }
 
 // Init replays all stream events in order into the aggregate.
-func (s *Stream) Init(aggregate Aggregate) error {
+func (s *Stream) Init(ctx context.Context, aggregate Aggregate) error {
 	for _, e := range s.appliedEvents {
-		if err := aggregate.Apply(e); err != nil {
+		if err := aggregate.Apply(ctx, e); err != nil {
 			return err
 		}
 	}

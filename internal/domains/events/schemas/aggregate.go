@@ -1,8 +1,10 @@
 package schemas
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -18,7 +20,9 @@ type Aggregate struct {
 	compiledSchema *jsonschema.Schema
 }
 
-func (a *Aggregate) Apply(event events.Event) error {
+func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
+	_ = ctx
+
 	switch event.EventType {
 	case EventTypeSchemaAdded:
 		return a.applySchemaAdded(event)
@@ -53,7 +57,9 @@ func (a *Aggregate) applySchemaAdded(event events.Event) error {
 }
 
 // Validate validates a JSON payload against the compiled schema.
-func (a *Aggregate) Validate(payload json.RawMessage) error {
+func (a *Aggregate) Validate(ctx context.Context, payload json.RawMessage) error {
+	_ = ctx
+
 	if a.compiledSchema == nil {
 		return errors.New("no schema has been applied")
 	}
@@ -64,12 +70,14 @@ func (a *Aggregate) Validate(payload json.RawMessage) error {
 	return a.compiledSchema.Validate(doc)
 }
 
-// Add records a schema creation event into the stream at the given occurred time.
-func (a *Aggregate) Add(stream *events.Stream, schema Schema, occurredAt int64) error {
+// Add records a schema creation event into the stream.
+func (a *Aggregate) Add(ctx context.Context, stream *events.Stream, schema Schema) error {
+	_ = ctx
+
 	req := events.Request{
 		EventType:    EventTypeSchemaAdded,
 		EventVersion: 1,
-		OccurredAt:   occurredAt,
+		OccurredAt:   time.Now().Unix(),
 		Payload:      schema,
 		Meta:         map[string]any{},
 	}
