@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/aromancev/synapse/internal/domains/events"
 )
 
 type DB interface {
@@ -25,12 +27,12 @@ func (r *Repository) Init(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS nodes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	uid BLOB NOT NULL,
-	schema_name TEXT NOT NULL,
+	schema_id TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
 	payload JSON NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_uid_uq ON nodes(uid);
-CREATE INDEX IF NOT EXISTS nodes_schema_name_created_at_desc_idx ON nodes(schema_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS nodes_schema_id_created_at_desc_idx ON nodes(schema_id, created_at DESC);
 `
 
 	_, err := r.db.ExecContext(ctx, query)
@@ -44,37 +46,37 @@ func (r *Repository) AddNode(ctx context.Context, n Node) error {
 		return errors.Join(validationErrors...)
 	}
 
-	const query = `INSERT INTO nodes(uid, schema_name, created_at, payload) VALUES(?, ?, ?, ?);`
-	if _, err := r.db.ExecContext(ctx, query, n.UID, n.SchemaName, n.CreatedAt, n.Payload); err != nil {
+	const query = `INSERT INTO nodes(uid, schema_id, created_at, payload) VALUES(?, ?, ?, ?);`
+	if _, err := r.db.ExecContext(ctx, query, n.UID, n.SchemaID, n.CreatedAt, n.Payload); err != nil {
 		return fmt.Errorf("insert node: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) GetNodesBySchema(ctx context.Context, schemaName string, limit int) ([]Node, error) {
+func (r *Repository) GetNodesBySchemaID(ctx context.Context, schemaID events.StreamID, limit int) ([]Node, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 
 	const query = `
-SELECT id, uid, schema_name, created_at, payload
+SELECT id, uid, schema_id, created_at, payload
 FROM nodes
-WHERE schema_name = ?
+WHERE schema_id = ?
 ORDER BY created_at DESC
 LIMIT ?;
 `
 
-	rows, err := r.db.QueryContext(ctx, query, schemaName, limit)
+	rows, err := r.db.QueryContext(ctx, query, schemaID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query nodes by schema: %w", err)
+		return nil, fmt.Errorf("query nodes by schema_id: %w", err)
 	}
 	defer rows.Close()
 
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.UID, &n.SchemaName, &n.CreatedAt, &n.Payload); err != nil {
+		if err := rows.Scan(&n.ID, &n.UID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
 		out = append(out, n)
