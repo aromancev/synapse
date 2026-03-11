@@ -121,7 +121,11 @@ func (s *Stream) Record(req Request) error {
 	if err != nil {
 		return err
 	}
-	metaJSON, err := json.Marshal(req.Meta)
+	meta := req.Meta
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}

@@ -2,10 +2,14 @@ package links
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/aromancev/synapse/internal/domains/events"
 )
 
-// Link represents a directional edge between two nodes.
+// Link is the projection model for links.
 type Link struct {
 	From      int64   `json:"from"`
 	To        int64   `json:"to"`
@@ -36,4 +40,18 @@ func (l Link) Validate() []error {
 	}
 
 	return errs
+}
+
+func StreamIDForPair(from, to events.StreamID) events.StreamID {
+	from, to = normalizePair(from, to)
+	return events.StreamID(fmt.Sprintf("link_%s_%s", from, to))
+}
+
+func normalizePair(from, to events.StreamID) (events.StreamID, events.StreamID) {
+	from = from.Normalized()
+	to = to.Normalized()
+	if strings.Compare(from.String(), to.String()) > 0 {
+		from, to = to, from
+	}
+	return from, to
 }
