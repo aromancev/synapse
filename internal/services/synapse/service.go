@@ -9,15 +9,9 @@ import (
 	"time"
 
 	"github.com/aromancev/synapse/internal/domains/events"
+	"github.com/aromancev/synapse/internal/domains/events/links"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
-)
-
-const (
-	SchemaStreamType     events.StreamType = "schema"
-	NodeStreamType       events.StreamType = "node"
-	EventTypeSchemaAdded events.EventType  = schemas.EventTypeSchemaAdded
-	EventTypeNodeAdded   events.EventType  = nodes.EventTypeNodeAdded
 )
 
 type Synapse struct {
@@ -48,15 +42,15 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	eventsRepo := events.NewRepository(tx)
 
 	streamID := events.StreamID(schema.ID.String())
-	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, SchemaStreamType, func() *schemas.Aggregate {
+	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, schemas.StreamTypeSchema, func() *schemas.Aggregate {
 		return &schemas.Aggregate{}
 	})
 	if err != nil {
 		return fmt.Errorf("load schema aggregate: %w", err)
 	}
 
-	if err := aggregate.Add(ctx, stream, schema); err != nil {
-		return fmt.Errorf("aggregate add schema: %w", err)
+	if err := aggregate.Create(ctx, stream, schema.ID, schema.Name, schema.Schema); err != nil {
+		return fmt.Errorf("aggregate create schema: %w", err)
 	}
 
 	for _, e := range stream.RecordedEvents() {
@@ -78,8 +72,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 		return fmt.Errorf("new node id: %w", err)
 	}
 
-	now := time.Now().Unix()
-	node := nodes.Node{UID: nodeID, SchemaID: schemaID, CreatedAt: now, Payload: json.RawMessage(payloadJSON)}.Normalized()
+	node := nodes.Node{UID: nodeID, SchemaID: schemaID, CreatedAt: nowUnix(), Payload: json.RawMessage(payloadJSON)}.Normalized()
 	if validationErrors := node.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -92,7 +85,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 
 	eventsRepo := events.NewRepository(tx)
 
-	schemaAggregate, _, err := loadAggregate(ctx, eventsRepo, schemaID, SchemaStreamType, func() *schemas.Aggregate {
+	schemaAggregate, _, err := loadAggregate(ctx, eventsRepo, schemaID, schemas.StreamTypeSchema, func() *schemas.Aggregate {
 		return &schemas.Aggregate{}
 	})
 	if err != nil {
@@ -103,20 +96,87 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 	}
 
 	streamID := events.StreamID(node.UID.String())
-	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, NodeStreamType, func() *nodes.Aggregate {
+	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
 		return &nodes.Aggregate{}
 	})
 	if err != nil {
 		return fmt.Errorf("load node aggregate: %w", err)
 	}
 
-	if err := aggregate.Add(ctx, stream, node); err != nil {
-		return fmt.Errorf("aggregate add node: %w", err)
+	if err := aggregate.Create(ctx, stream, node.Payload, node.UID, node.SchemaID); err != nil {
+		return fmt.Errorf("aggregate create node: %w", err)
 	}
 
 	for _, e := range stream.RecordedEvents() {
 		if err := eventsRepo.AppendEvent(ctx, e, e.StreamVersion-1); err != nil {
 			return fmt.Errorf("append node event: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
+	fromStreamID := events.StreamID(fromID.String())
+	toStreamID := events.StreamID(toID.String())
+	fromStreamID, toStreamID = normalizeLinkPair(fromStreamID, toStreamID)
+	if err := fromStreamID.Validate(); err != nil {
+		return fmt.Errorf("from: %w", err)
+	}
+	if err := toStreamID.Validate(); err != nil {
+		return fmt.Errorf("to: %w", err)
+	}
+	if fromStreamID == toStreamID {
+		return errors.New("from and to must be different")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository(tx)
+
+	fromAggregate, _, err := loadAggregate(ctx, eventsRepo, fromStreamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
+		return &nodes.Aggregate{}
+	})
+	if err != nil {
+		return fmt.Errorf("load from node aggregate: %w", err)
+	}
+	if !fromAggregate.Exists() {
+		return fmt.Errorf("from node does not exist: %s", fromID)
+	}
+
+	toAggregate, _, err := loadAggregate(ctx, eventsRepo, toStreamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
+		return &nodes.Aggregate{}
+	})
+	if err != nil {
+		return fmt.Errorf("load to node aggregate: %w", err)
+	}
+	if !toAggregate.Exists() {
+		return fmt.Errorf("to node does not exist: %s", toID)
+	}
+
+	streamID := links.StreamIDForPair(fromStreamID, toStreamID)
+	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, links.StreamTypeLink, func() *links.Aggregate {
+		return &links.Aggregate{}
+	})
+	if err != nil {
+		return fmt.Errorf("load link aggregate: %w", err)
+	}
+
+	if err := aggregate.Create(ctx, stream, fromStreamID, toStreamID); err != nil {
+		return fmt.Errorf("aggregate create link: %w", err)
+	}
+
+	for _, e := range stream.RecordedEvents() {
+		if err := eventsRepo.AppendEvent(ctx, e, e.StreamVersion-1); err != nil {
+			return fmt.Errorf("append link event: %w", err)
 		}
 	}
 
@@ -141,4 +201,17 @@ func loadAggregate[T events.Aggregate](ctx context.Context, repo *events.Reposit
 	}
 
 	return aggregate, stream, nil
+}
+
+func nowUnix() int64 {
+	return time.Now().Unix()
+}
+
+func normalizeLinkPair(from, to events.StreamID) (events.StreamID, events.StreamID) {
+	from = from.Normalized()
+	to = to.Normalized()
+	if from.String() > to.String() {
+		from, to = to, from
+	}
+	return from, to
 }
