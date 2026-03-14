@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,13 +13,14 @@ import (
 	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/aromancev/synapse/internal/domains/events/links"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
+	"github.com/aromancev/synapse/internal/domains/events/replicators"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
-func newTestService(t *testing.T) (*Synapse, *events.Repository, *sql.DB) {
+func newTestService(t *testing.T, reps ...replicators.Replicator) (*Synapse, *events.Repository, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
@@ -30,7 +33,7 @@ func newTestService(t *testing.T) (*Synapse, *events.Repository, *sql.DB) {
 	require.NoError(t, nodes.NewProjectionRepository().Init(context.Background(), db))
 	require.NoError(t, links.NewProjectionRepository().Init(context.Background(), db))
 
-	return NewSynapse(db), eventsRepo, db
+	return NewSynapse(db, reps...), eventsRepo, db
 }
 
 func TestSynapse_AddSchema(t *testing.T) {
@@ -210,6 +213,49 @@ func TestSynapse_RunProjections(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, storedLinksAgain, 1)
 	})
+}
+
+func TestSynapse_RunReplicators(t *testing.T) {
+	t.Run("catches up all events into a single jsonl file and persists iterators", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "replica.jsonl")
+		rep := replicators.NewFile("events_jsonl", path)
+		svc, eventsRepo, db := newTestService(t, rep)
+		schemaID, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
+		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
+
+		require.NoError(t, svc.RunReplicators(context.Background()))
+
+		iterator, err := eventsRepo.GetReplicatorIterator(context.Background(), db, rep.Name())
+		require.NoError(t, err)
+		assert.Greater(t, iterator, int64(0))
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		require.Len(t, lines, 4)
+
+		for i, line := range lines {
+			var event events.Event
+			require.NoError(t, json.Unmarshal([]byte(line), &event))
+			assert.Equal(t, int64(i+1), event.GlobalPosition)
+		}
+
+		require.NoError(t, svc.RunReplicators(context.Background()))
+
+		data, err = os.ReadFile(path)
+		require.NoError(t, err)
+		lines = strings.Split(strings.TrimSpace(string(data)), "\n")
+		require.Len(t, lines, 4)
+		assert.Equal(t, schemaID.String(), mustReadReplicatedEvent(t, lines[0]).StreamID.String())
+	})
+}
+
+func mustReadReplicatedEvent(t *testing.T, line string) events.Event {
+	t.Helper()
+
+	var event events.Event
+	require.NoError(t, json.Unmarshal([]byte(line), &event))
+	return event
 }
 
 func seedTwoNodes(t *testing.T, svc *Synapse, eventsRepo *events.Repository, db *sql.DB) (schemaID events.StreamID, fromID, toID nodes.ID) {
