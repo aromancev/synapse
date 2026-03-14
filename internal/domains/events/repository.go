@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS projection_iterators (
 	updated_at INTEGER NOT NULL,
 	PRIMARY KEY (projection_name, stream_type)
 );
+
+CREATE TABLE IF NOT EXISTS replicator_iterators (
+	replicator_name TEXT PRIMARY KEY,
+	last_global_position INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 
 	_, err := db.ExecContext(ctx, query)
@@ -280,6 +286,72 @@ ON CONFLICT(projection_name, stream_type) DO UPDATE SET
 	return nil
 }
 
+func (r *Repository) GetReplicatorIterator(ctx context.Context, db sqlx.DB, replicatorName string) (int64, error) {
+	if replicatorName == "" {
+		return 0, errors.New("replicator_name is required")
+	}
+
+	const query = `
+SELECT last_global_position
+FROM replicator_iterators
+WHERE replicator_name = ?;
+`
+
+	var position int64
+	err := db.QueryRowContext(ctx, query, replicatorName).Scan(&position)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("get replicator iterator: %w", err)
+	}
+
+	return position, nil
+}
+
+func (r *Repository) AdvanceReplicatorIterator(ctx context.Context, db sqlx.DB, replicatorName string, toGlobalPosition int64, updatedAt int64) error {
+	if replicatorName == "" {
+		return errors.New("replicator_name is required")
+	}
+	if toGlobalPosition < 0 {
+		return errors.New("to_global_position must be >= 0")
+	}
+
+	const query = `
+INSERT INTO replicator_iterators(replicator_name, last_global_position, updated_at)
+VALUES(?, ?, ?)
+ON CONFLICT(replicator_name) DO UPDATE SET
+	last_global_position = MAX(replicator_iterators.last_global_position, excluded.last_global_position),
+	updated_at = excluded.updated_at;
+`
+
+	if _, err := db.ExecContext(ctx, query, replicatorName, toGlobalPosition, updatedAt); err != nil {
+		return fmt.Errorf("advance replicator iterator: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) ResetReplicatorIterator(ctx context.Context, db sqlx.DB, replicatorName string, updatedAt int64) error {
+	if replicatorName == "" {
+		return errors.New("replicator_name is required")
+	}
+
+	const query = `
+INSERT INTO replicator_iterators(replicator_name, last_global_position, updated_at)
+VALUES(?, 0, ?)
+ON CONFLICT(replicator_name) DO UPDATE SET
+	last_global_position = 0,
+	updated_at = excluded.updated_at;
+`
+
+	if _, err := db.ExecContext(ctx, query, replicatorName, updatedAt); err != nil {
+		return fmt.Errorf("reset replicator iterator: %w", err)
+	}
+
+	return nil
+}
+
 func (r *Repository) GetStreamTypeHeadGlobalPosition(ctx context.Context, db sqlx.DB, streamType StreamType) (int64, error) {
 	streamType = streamType.Normalized()
 	if streamType == "" {
@@ -291,6 +363,17 @@ func (r *Repository) GetStreamTypeHeadGlobalPosition(ctx context.Context, db sql
 	var head int64
 	if err := db.QueryRowContext(ctx, query, streamType.String()).Scan(&head); err != nil {
 		return 0, fmt.Errorf("get stream type head global position: %w", err)
+	}
+
+	return head, nil
+}
+
+func (r *Repository) GetHeadGlobalPosition(ctx context.Context, db sqlx.DB) (int64, error) {
+	const query = `SELECT COALESCE(MAX(global_position), 0) FROM events;`
+
+	var head int64
+	if err := db.QueryRowContext(ctx, query).Scan(&head); err != nil {
+		return 0, fmt.Errorf("get head global position: %w", err)
 	}
 
 	return head, nil

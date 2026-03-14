@@ -111,6 +111,27 @@ func TestRepository(t *testing.T) {
 		assert.Equal(t, int64(0), pos)
 	})
 
+	t.Run("Replicator iterator advance/get/reset", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+
+		pos, err := repo.GetReplicatorIterator(ctx, db, "events_jsonl")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), pos)
+
+		require.NoError(t, repo.AdvanceReplicatorIterator(ctx, db, "events_jsonl", 5, 1700000000))
+		require.NoError(t, repo.AdvanceReplicatorIterator(ctx, db, "events_jsonl", 3, 1700000001))
+
+		pos, err = repo.GetReplicatorIterator(ctx, db, "events_jsonl")
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), pos)
+
+		require.NoError(t, repo.ResetReplicatorIterator(ctx, db, "events_jsonl", 1700000002))
+		pos, err = repo.GetReplicatorIterator(ctx, db, "events_jsonl")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), pos)
+	})
+
 	t.Run("GetStreamTypeHeadGlobalPosition", func(t *testing.T) {
 		repo, db := newTestRepository(t)
 		ctx := context.Background()
@@ -126,5 +147,21 @@ func TestRepository(t *testing.T) {
 		head, err = repo.GetStreamTypeHeadGlobalPosition(ctx, db, StreamType("node"))
 		require.NoError(t, err)
 		assert.Equal(t, int64(3), head)
+	})
+
+	t.Run("GetHeadGlobalPosition", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+
+		head, err := repo.GetHeadGlobalPosition(ctx, db)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), head)
+
+		require.NoError(t, repo.AppendEvent(ctx, db, newEvent(StreamID("node:1"), StreamType("node"), EventType("node.created"), 1700000000), 0))
+		require.NoError(t, repo.AppendEvent(ctx, db, newEvent(StreamID("schema:1"), StreamType("schema"), EventType("schema.created"), 1700000001), 0))
+
+		head, err = repo.GetHeadGlobalPosition(ctx, db)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), head)
 	})
 }

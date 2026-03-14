@@ -11,12 +11,14 @@ import (
 	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/aromancev/synapse/internal/domains/events/links"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
+	"github.com/aromancev/synapse/internal/domains/events/replicators"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
 	"github.com/aromancev/synapse/internal/platform/sqlx"
 )
 
 type Synapse struct {
-	db *sql.DB
+	db          *sql.DB
+	replicators []replicators.Replicator
 }
 
 type projection interface {
@@ -25,8 +27,8 @@ type projection interface {
 	Project(ctx context.Context, db sqlx.DB, event events.Event) error
 }
 
-func NewSynapse(db *sql.DB) *Synapse {
-	return &Synapse{db: db}
+func NewSynapse(db *sql.DB, replicators ...replicators.Replicator) *Synapse {
+	return &Synapse{db: db, replicators: replicators}
 }
 
 func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error {
@@ -258,6 +260,52 @@ func (s *Synapse) RunProjection(ctx context.Context, p projection) error {
 
 			if err := tx.Commit(); err != nil {
 				return fmt.Errorf("commit projection transaction: %w", err)
+			}
+		}
+	}
+}
+
+func (s *Synapse) RunReplicators(ctx context.Context) error {
+	for _, r := range s.replicators {
+		if err := s.RunReplicator(ctx, r); err != nil {
+			return fmt.Errorf("run replicator %s: %w", r.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Synapse) RunReplicator(ctx context.Context, r replicators.Replicator) error {
+	eventsRepo := events.NewRepository()
+	for {
+		lastPosition, err := eventsRepo.GetReplicatorIterator(ctx, s.db, r.Name())
+		if err != nil {
+			return fmt.Errorf("get iterator: %w", err)
+		}
+
+		headPosition, err := eventsRepo.GetHeadGlobalPosition(ctx, s.db)
+		if err != nil {
+			return fmt.Errorf("get head position: %w", err)
+		}
+		if lastPosition >= headPosition {
+			return nil
+		}
+
+		batch, err := eventsRepo.GetStreamEvents(ctx, s.db, "", lastPosition, 100)
+		if err != nil {
+			return fmt.Errorf("get events batch: %w", err)
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+
+		for _, e := range batch {
+			if err := r.Replicate(ctx, e); err != nil {
+				return fmt.Errorf("replicate event at global position %d: %w", e.GlobalPosition, err)
+			}
+
+			if err := eventsRepo.AdvanceReplicatorIterator(ctx, s.db, r.Name(), e.GlobalPosition, nowUnix()); err != nil {
+				return fmt.Errorf("advance iterator: %w", err)
 			}
 		}
 	}
