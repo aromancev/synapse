@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 
@@ -36,7 +35,7 @@ var schemasAddCmd = &cobra.Command{
 			return fmt.Errorf("provide --schema or --schema-file")
 		}
 
-		db, err := sql.Open("sqlite", dbPath)
+		db, err := openDB(dbPath)
 		if err != nil {
 			return err
 		}

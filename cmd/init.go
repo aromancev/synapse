@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/aromancev/synapse/internal/domains/events"
@@ -18,7 +17,7 @@ var initCmd = &cobra.Command{
 	Short: "Initialize synapse",
 	Long:  `Initializes the synapse memory system.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := sql.Open("sqlite", dbPath)
+		db, err := openDB(dbPath)
 		if err != nil {
 			return err
 		}
