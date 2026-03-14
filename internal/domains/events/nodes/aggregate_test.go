@@ -18,7 +18,6 @@ func TestAggregate_Create(t *testing.T) {
 
 		stream := events.NewStream(events.StreamID(uid.String()), StreamTypeNode, nil)
 		aggregate := &Aggregate{}
-		require.NoError(t, stream.Init(context.Background(), aggregate))
 
 		err = aggregate.Create(context.Background(), stream, json.RawMessage(` { "name": "Ada" } `), uid, events.StreamID("  schema_01HXYZ  "))
 		require.NoError(t, err)

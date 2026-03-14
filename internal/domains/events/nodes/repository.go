@@ -7,22 +7,16 @@ import (
 	"fmt"
 
 	"github.com/aromancev/synapse/internal/domains/events"
+	"github.com/aromancev/synapse/internal/platform/sqlx"
 )
 
-type DB interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+type ProjectionRepository struct{}
+
+func NewProjectionRepository() *ProjectionRepository {
+	return &ProjectionRepository{}
 }
 
-type Repository struct {
-	db DB
-}
-
-func NewRepository(db DB) *Repository {
-	return &Repository{db: db}
-}
-
-func (r *Repository) Init(ctx context.Context) error {
+func (r *ProjectionRepository) Init(ctx context.Context, db sqlx.DB) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS nodes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,26 +29,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS nodes_uid_uq ON nodes(uid);
 CREATE INDEX IF NOT EXISTS nodes_schema_id_created_at_desc_idx ON nodes(schema_id, created_at DESC);
 `
 
-	_, err := r.db.ExecContext(ctx, query)
+	_, err := db.ExecContext(ctx, query)
 	return err
 }
 
-func (r *Repository) AddNode(ctx context.Context, n Node) error {
+func (r *ProjectionRepository) UpsertNode(ctx context.Context, db sqlx.DB, n Node) error {
 	n = n.Normalized()
 
 	if validationErrors := n.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
 
-	const query = `INSERT INTO nodes(uid, schema_id, created_at, payload) VALUES(?, ?, ?, ?);`
-	if _, err := r.db.ExecContext(ctx, query, n.UID, n.SchemaID, n.CreatedAt, n.Payload); err != nil {
-		return fmt.Errorf("insert node: %w", err)
+	const query = `
+INSERT INTO nodes(uid, schema_id, created_at, payload)
+VALUES(?, ?, ?, ?)
+ON CONFLICT(uid) DO UPDATE SET
+	schema_id = excluded.schema_id,
+	created_at = excluded.created_at,
+	payload = excluded.payload;
+`
+	if _, err := db.ExecContext(ctx, query, n.UID, n.SchemaID, n.CreatedAt, n.Payload); err != nil {
+		return fmt.Errorf("upsert node: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Repository) GetNodesBySchemaID(ctx context.Context, schemaID events.StreamID, limit int) ([]Node, error) {
+func (r *ProjectionRepository) GetNodeByUID(ctx context.Context, db sqlx.DB, uid ID) (Node, error) {
+	const query = `
+SELECT id, uid, schema_id, created_at, payload
+FROM nodes
+WHERE uid = ?;
+`
+
+	var n Node
+	if err := db.QueryRowContext(ctx, query, uid).Scan(&n.ID, &n.UID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Node{}, fmt.Errorf("node not found: %s", uid)
+		}
+		return Node{}, fmt.Errorf("get node by uid: %w", err)
+	}
+
+	return n, nil
+}
+
+func (r *ProjectionRepository) GetNodesBySchemaID(ctx context.Context, db sqlx.DB, schemaID events.StreamID, limit int) ([]Node, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -67,7 +86,7 @@ ORDER BY created_at DESC
 LIMIT ?;
 `
 
-	rows, err := r.db.QueryContext(ctx, query, schemaID, limit)
+	rows, err := db.QueryContext(ctx, query, schemaID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query nodes by schema_id: %w", err)
 	}

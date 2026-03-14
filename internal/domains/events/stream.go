@@ -101,14 +101,10 @@ func NewStream(streamID StreamID, streamType StreamType, events []Event) *Stream
 	}
 }
 
-// Init replays all stream events in order into the aggregate.
-func (s *Stream) Init(ctx context.Context, aggregate Aggregate) error {
-	for _, e := range s.appliedEvents {
-		if err := aggregate.Apply(ctx, e); err != nil {
-			return err
-		}
-	}
-	return nil
+// AppliedEvents returns the events loaded into the stream.
+func (s *Stream) AppliedEvents() []Event {
+	copied := append([]Event(nil), s.appliedEvents...)
+	return copied
 }
 
 // Record creates a new Event from the request, assigns operational fields,

@@ -1,0 +1,54 @@
+package nodes
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/aromancev/synapse/internal/domains/events"
+	"github.com/aromancev/synapse/internal/platform/sqlx"
+)
+
+const ProjectionName = "nodes"
+
+type Projector interface {
+	Name() string
+	StreamType() events.StreamType
+	Project(ctx context.Context, db sqlx.DB, event events.Event) error
+}
+
+type Projection struct {
+	repo *ProjectionRepository
+}
+
+func NewProjection() *Projection {
+	return &Projection{repo: NewProjectionRepository()}
+}
+
+func (p *Projection) Name() string {
+	return ProjectionName
+}
+
+func (p *Projection) StreamType() events.StreamType {
+	return StreamTypeNode
+}
+
+func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event) error {
+	switch event.EventType {
+	case EventTypeNodeCreated:
+		var payload createdEvent
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("unmarshal node.created payload: %w", err)
+		}
+		payload = payload.normalized()
+
+		return p.repo.UpsertNode(ctx, db, Node{
+			UID:       payload.UID,
+			SchemaID:  payload.SchemaID,
+			CreatedAt: event.OccurredAt,
+			Payload:   payload.Payload,
+		})
+	default:
+		return nil
+	}
+}
