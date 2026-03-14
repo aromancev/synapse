@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aromancev/synapse/internal/settings"
+	"github.com/aromancev/synapse/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -58,15 +58,15 @@ func configureLogging(ctx context.Context, dbPath string) error {
 func resolveLogPath(ctx context.Context, dbPath string) (string, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
-		return settings.DefaultLogPath, nil
+		return config.DefaultLogPath, nil
 	}
 	defer db.Close()
 
-	repo := settings.NewRepository(db)
+	repo := config.NewRepository(db)
 	cfg, err := repo.Get(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table: settings") {
-			return settings.DefaultLogPath, nil
+		if strings.Contains(err.Error(), "no such table: config") {
+			return config.DefaultLogPath, nil
 		}
 		return "", err
 	}
