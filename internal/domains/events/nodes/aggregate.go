@@ -15,25 +15,25 @@ const (
 )
 
 type createdEvent struct {
-	UID      ID              `json:"uid"`
+	ID       ID              `json:"id"`
 	SchemaID events.StreamID `json:"schema_id"`
 	Payload  json.RawMessage `json:"payload"`
 }
 
 func (e createdEvent) normalized() createdEvent {
-	node := Node{UID: e.UID, SchemaID: e.SchemaID, Payload: e.Payload}.Normalized()
-	return createdEvent{UID: node.UID, SchemaID: node.SchemaID, Payload: node.Payload}
+	node := Node{ID: e.ID, SchemaID: e.SchemaID, Payload: e.Payload}.Normalized()
+	return createdEvent{ID: node.ID, SchemaID: node.SchemaID, Payload: node.Payload}
 }
 
 func (e createdEvent) validate() []error {
-	node := Node{UID: e.UID, SchemaID: e.SchemaID, CreatedAt: time.Now().Unix(), Payload: e.Payload}
+	node := Node{ID: e.ID, SchemaID: e.SchemaID, CreatedAt: time.Now().Unix(), Payload: e.Payload}
 	return node.Validate()
 }
 
 // Aggregate is an event-sourced aggregate for nodes.
 type Aggregate struct {
 	exists   bool
-	uid      ID
+	id       ID
 	schemaID events.StreamID
 	payload  json.RawMessage
 }
@@ -56,7 +56,7 @@ func (a *Aggregate) applyCreated(event events.Event) error {
 	}
 	payload = payload.normalized()
 	a.exists = true
-	a.uid = payload.UID
+	a.id = payload.ID
 	a.schemaID = payload.SchemaID
 	a.payload = payload.Payload
 	return nil
@@ -64,10 +64,10 @@ func (a *Aggregate) applyCreated(event events.Event) error {
 
 func (a *Aggregate) Exists() bool { return a.exists }
 
-func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, payload json.RawMessage, uid ID, schemaID events.StreamID) error {
+func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, payload json.RawMessage, id ID, schemaID events.StreamID) error {
 	_ = ctx
 
-	eventPayload := createdEvent{UID: uid, SchemaID: schemaID, Payload: payload}.normalized()
+	eventPayload := createdEvent{ID: id, SchemaID: schemaID, Payload: payload}.normalized()
 	if validationErrors := eventPayload.validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}

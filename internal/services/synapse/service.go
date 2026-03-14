@@ -81,7 +81,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 		return fmt.Errorf("new node id: %w", err)
 	}
 
-	node := nodes.Node{UID: nodeID, SchemaID: schemaID, CreatedAt: nowUnix(), Payload: json.RawMessage(payloadJSON)}.Normalized()
+	node := nodes.Node{ID: nodeID, SchemaID: schemaID, CreatedAt: nowUnix(), Payload: json.RawMessage(payloadJSON)}.Normalized()
 	if validationErrors := node.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -106,7 +106,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 		return fmt.Errorf("validate node payload against schema: %w", err)
 	}
 
-	streamID := events.StreamID(node.UID.String())
+	streamID := events.StreamID(node.ID.String())
 	stream, err := loadStream(ctx, eventsRepo, tx, streamID, nodes.StreamTypeNode)
 	if err != nil {
 		return fmt.Errorf("load node stream: %w", err)
@@ -116,7 +116,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 		return fmt.Errorf("replay node aggregate: %w", err)
 	}
 
-	if err := aggregate.Create(ctx, stream, node.Payload, node.UID, node.SchemaID); err != nil {
+	if err := aggregate.Create(ctx, stream, node.Payload, node.ID, node.SchemaID); err != nil {
 		return fmt.Errorf("aggregate create node: %w", err)
 	}
 

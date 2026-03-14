@@ -19,13 +19,11 @@ func NewProjectionRepository() *ProjectionRepository {
 func (r *ProjectionRepository) Init(ctx context.Context, db sqlx.DB) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS nodes (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	uid BLOB NOT NULL,
+	id BLOB PRIMARY KEY,
 	schema_id TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
 	payload JSON NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS nodes_uid_uq ON nodes(uid);
 CREATE INDEX IF NOT EXISTS nodes_schema_id_created_at_desc_idx ON nodes(schema_id, created_at DESC);
 `
 
@@ -41,33 +39,33 @@ func (r *ProjectionRepository) UpsertNode(ctx context.Context, db sqlx.DB, n Nod
 	}
 
 	const query = `
-INSERT INTO nodes(uid, schema_id, created_at, payload)
+INSERT INTO nodes(id, schema_id, created_at, payload)
 VALUES(?, ?, ?, ?)
-ON CONFLICT(uid) DO UPDATE SET
+ON CONFLICT(id) DO UPDATE SET
 	schema_id = excluded.schema_id,
 	created_at = excluded.created_at,
 	payload = excluded.payload;
 `
-	if _, err := db.ExecContext(ctx, query, n.UID, n.SchemaID, n.CreatedAt, n.Payload); err != nil {
+	if _, err := db.ExecContext(ctx, query, n.ID, n.SchemaID, n.CreatedAt, n.Payload); err != nil {
 		return fmt.Errorf("upsert node: %w", err)
 	}
 
 	return nil
 }
 
-func (r *ProjectionRepository) GetNodeByUID(ctx context.Context, db sqlx.DB, uid ID) (Node, error) {
+func (r *ProjectionRepository) GetNodeByID(ctx context.Context, db sqlx.DB, id ID) (Node, error) {
 	const query = `
-SELECT id, uid, schema_id, created_at, payload
+SELECT id, schema_id, created_at, payload
 FROM nodes
-WHERE uid = ?;
+WHERE id = ?;
 `
 
 	var n Node
-	if err := db.QueryRowContext(ctx, query, uid).Scan(&n.ID, &n.UID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
+	if err := db.QueryRowContext(ctx, query, id).Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Node{}, fmt.Errorf("node not found: %s", uid)
+			return Node{}, fmt.Errorf("node not found: %s", id)
 		}
-		return Node{}, fmt.Errorf("get node by uid: %w", err)
+		return Node{}, fmt.Errorf("get node by id: %w", err)
 	}
 
 	return n, nil
@@ -79,7 +77,7 @@ func (r *ProjectionRepository) GetNodesBySchemaID(ctx context.Context, db sqlx.D
 	}
 
 	const query = `
-SELECT id, uid, schema_id, created_at, payload
+SELECT id, schema_id, created_at, payload
 FROM nodes
 WHERE schema_id = ?
 ORDER BY created_at DESC
@@ -95,7 +93,7 @@ LIMIT ?;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.UID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.Payload); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
 		out = append(out, n)
