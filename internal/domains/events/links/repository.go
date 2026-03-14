@@ -2,30 +2,25 @@ package links
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/aromancev/synapse/internal/domains/events"
+	"github.com/aromancev/synapse/internal/platform/sqlx"
 )
 
-type DB interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+type ProjectionRepository struct{}
+
+func NewProjectionRepository() *ProjectionRepository {
+	return &ProjectionRepository{}
 }
 
-type ProjectionRepository struct {
-	db DB
-}
-
-func NewProjectionRepository(db DB) *ProjectionRepository {
-	return &ProjectionRepository{db: db}
-}
-
-func (r *ProjectionRepository) Init(ctx context.Context) error {
+func (r *ProjectionRepository) Init(ctx context.Context, db sqlx.DB) error {
 	const query = `
 CREATE TABLE IF NOT EXISTS links (
-	"from" INTEGER NOT NULL,
-	"to" INTEGER NOT NULL,
+	"from" TEXT NOT NULL,
+	"to" TEXT NOT NULL,
 	weight REAL NOT NULL,
 	created_at INTEGER NOT NULL,
 	PRIMARY KEY ("from", "to")
@@ -34,11 +29,11 @@ CREATE INDEX IF NOT EXISTS links_to_idx ON links("to");
 CREATE INDEX IF NOT EXISTS links_created_at_desc_idx ON links(created_at DESC);
 `
 
-	_, err := r.db.ExecContext(ctx, query)
+	_, err := db.ExecContext(ctx, query)
 	return err
 }
 
-func (r *ProjectionRepository) UpsertLink(ctx context.Context, l Link) error {
+func (r *ProjectionRepository) UpsertLink(ctx context.Context, db sqlx.DB, l Link) error {
 	if validationErrors := l.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -50,14 +45,14 @@ ON CONFLICT("from", "to") DO UPDATE SET
 	weight = excluded.weight,
 	created_at = excluded.created_at;
 `
-	if _, err := r.db.ExecContext(ctx, query, l.From, l.To, l.Weight, l.CreatedAt); err != nil {
+	if _, err := db.ExecContext(ctx, query, l.From, l.To, l.Weight, l.CreatedAt); err != nil {
 		return fmt.Errorf("upsert link: %w", err)
 	}
 
 	return nil
 }
 
-func (r *ProjectionRepository) GetLinksFrom(ctx context.Context, fromIDs []int64, limit int) ([]Link, error) {
+func (r *ProjectionRepository) GetLinksFrom(ctx context.Context, db sqlx.DB, fromIDs []events.StreamID, limit int) ([]Link, error) {
 	if len(fromIDs) == 0 {
 		return nil, nil
 	}
@@ -80,7 +75,7 @@ LIMIT ?;
 	}
 	args = append(args, limit)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query links from: %w", err)
 	}
@@ -102,7 +97,7 @@ LIMIT ?;
 	return out, nil
 }
 
-func (r *ProjectionRepository) GetLinksTo(ctx context.Context, toIDs []int64, limit int) ([]Link, error) {
+func (r *ProjectionRepository) GetLinksTo(ctx context.Context, db sqlx.DB, toIDs []events.StreamID, limit int) ([]Link, error) {
 	if len(toIDs) == 0 {
 		return nil, nil
 	}
@@ -125,7 +120,7 @@ LIMIT ?;
 	}
 	args = append(args, limit)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query links to: %w", err)
 	}

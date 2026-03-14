@@ -11,23 +11,23 @@ import (
 
 // Link is the projection model for links.
 type Link struct {
-	From      int64   `json:"from"`
-	To        int64   `json:"to"`
-	Weight    float64 `json:"weight"`
-	CreatedAt int64   `json:"created_at"`
+	From      events.StreamID `json:"from"`
+	To        events.StreamID `json:"to"`
+	Weight    float64         `json:"weight"`
+	CreatedAt int64           `json:"created_at"`
 }
 
 // Validate checks whether Link is valid.
 func (l Link) Validate() []error {
 	var errs []error
 
-	if l.From <= 0 {
-		errs = append(errs, errors.New("from is required and must be > 0"))
+	if err := l.From.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("from: %w", err))
 	}
-	if l.To <= 0 {
-		errs = append(errs, errors.New("to is required and must be > 0"))
+	if err := l.To.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("to: %w", err))
 	}
-	if l.From == l.To {
+	if l.From.Normalized() == l.To.Normalized() {
 		errs = append(errs, errors.New("from and to must be different"))
 	}
 	if l.Weight < 0 || l.Weight > 1 {

@@ -24,7 +24,6 @@ func TestAggregate_Create(t *testing.T) {
 
 		stream := events.NewStream(events.StreamID(id.String()), events.StreamType("schema"), nil)
 		aggregate := &Aggregate{}
-		require.NoError(t, stream.Init(context.Background(), aggregate))
 
 		err = aggregate.Create(context.Background(), stream, schema.ID, schema.Name, schema.Schema)
 		require.NoError(t, err)

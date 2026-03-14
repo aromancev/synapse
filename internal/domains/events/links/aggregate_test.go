@@ -11,6 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func replayAggregate(t *testing.T, aggregate *Aggregate, stream *events.Stream) {
+	t.Helper()
+	for _, event := range stream.AppliedEvents() {
+		require.NoError(t, aggregate.Apply(context.Background(), event))
+	}
+}
+
 func TestAggregate_Create(t *testing.T) {
 	t.Run("records normalized link created event", func(t *testing.T) {
 		from := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAV")
@@ -18,7 +25,6 @@ func TestAggregate_Create(t *testing.T) {
 
 		stream := events.NewStream(StreamIDForPair(to, from), StreamTypeLink, nil)
 		aggregate := &Aggregate{}
-		require.NoError(t, stream.Init(context.Background(), aggregate))
 
 		err := aggregate.Create(context.Background(), stream, to, from)
 		require.NoError(t, err)
@@ -45,12 +51,11 @@ func TestAggregate_Create(t *testing.T) {
 
 		stream := events.NewStream(StreamIDForPair(from, to), StreamTypeLink, nil)
 		aggregate := &Aggregate{}
-		require.NoError(t, stream.Init(context.Background(), aggregate))
 		require.NoError(t, aggregate.Create(context.Background(), stream, from, to))
 
 		replayed := events.NewStream(stream.RecordedEvents()[0].StreamID, StreamTypeLink, stream.RecordedEvents())
 		aggregate = &Aggregate{}
-		require.NoError(t, replayed.Init(context.Background(), aggregate))
+		replayAggregate(t, aggregate, replayed)
 		require.True(t, aggregate.Exists())
 		err := aggregate.Create(context.Background(), replayed, to, from)
 		require.EqualError(t, err, "link already exists")

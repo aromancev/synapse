@@ -29,23 +29,23 @@ var initCmd = &cobra.Command{
 			return err
 		}
 
-		schemasRepo := schemas.NewProjectionRepository(db)
-		if err := schemasRepo.Init(context.Background()); err != nil {
+		schemasRepo := schemas.NewProjectionRepository()
+		if err := schemasRepo.Init(context.Background(), db); err != nil {
 			return err
 		}
 
-		eventsRepo := events.NewRepository(db)
-		if err := eventsRepo.Init(context.Background()); err != nil {
+		eventsRepo := events.NewRepository()
+		if err := eventsRepo.Init(context.Background(), db); err != nil {
 			return err
 		}
 
-		nodesRepo := nodes.NewRepository(db)
-		if err := nodesRepo.Init(context.Background()); err != nil {
+		nodesRepo := nodes.NewProjectionRepository()
+		if err := nodesRepo.Init(context.Background(), db); err != nil {
 			return err
 		}
 
-		linksRepo := links.NewProjectionRepository(db)
-		if err := linksRepo.Init(context.Background()); err != nil {
+		linksRepo := links.NewProjectionRepository()
+		if err := linksRepo.Init(context.Background(), db); err != nil {
 			return err
 		}
 

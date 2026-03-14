@@ -12,10 +12,17 @@ import (
 	"github.com/aromancev/synapse/internal/domains/events/links"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
+	"github.com/aromancev/synapse/internal/platform/sqlx"
 )
 
 type Synapse struct {
 	db *sql.DB
+}
+
+type projection interface {
+	Name() string
+	StreamType() events.StreamType
+	Project(ctx context.Context, db sqlx.DB, event events.Event) error
 }
 
 func NewSynapse(db *sql.DB) *Synapse {
@@ -39,14 +46,16 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	}
 	defer tx.Rollback()
 
-	eventsRepo := events.NewRepository(tx)
-
+	eventsRepo := events.NewRepository()
 	streamID := events.StreamID(schema.ID.String())
-	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, schemas.StreamTypeSchema, func() *schemas.Aggregate {
-		return &schemas.Aggregate{}
-	})
+	stream, err := loadStream(ctx, eventsRepo, tx, streamID, schemas.StreamTypeSchema)
 	if err != nil {
-		return fmt.Errorf("load schema aggregate: %w", err)
+		return fmt.Errorf("load schema stream: %w", err)
+	}
+
+	aggregate := &schemas.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return fmt.Errorf("replay schema aggregate: %w", err)
 	}
 
 	if err := aggregate.Create(ctx, stream, schema.ID, schema.Name, schema.Schema); err != nil {
@@ -54,7 +63,7 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	}
 
 	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, e, e.StreamVersion-1); err != nil {
+		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
 			return fmt.Errorf("append schema event: %w", err)
 		}
 	}
@@ -83,24 +92,28 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 	}
 	defer tx.Rollback()
 
-	eventsRepo := events.NewRepository(tx)
+	eventsRepo := events.NewRepository()
 
-	schemaAggregate, _, err := loadAggregate(ctx, eventsRepo, schemaID, schemas.StreamTypeSchema, func() *schemas.Aggregate {
-		return &schemas.Aggregate{}
-	})
+	schemaStream, err := loadStream(ctx, eventsRepo, tx, schemaID, schemas.StreamTypeSchema)
 	if err != nil {
-		return fmt.Errorf("load schema aggregate: %w", err)
+		return fmt.Errorf("load schema stream: %w", err)
+	}
+	schemaAggregate := &schemas.Aggregate{}
+	if err := replayAggregate(ctx, schemaAggregate, schemaStream); err != nil {
+		return fmt.Errorf("replay schema aggregate: %w", err)
 	}
 	if err := schemaAggregate.Validate(ctx, node.Payload); err != nil {
 		return fmt.Errorf("validate node payload against schema: %w", err)
 	}
 
 	streamID := events.StreamID(node.UID.String())
-	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
-		return &nodes.Aggregate{}
-	})
+	stream, err := loadStream(ctx, eventsRepo, tx, streamID, nodes.StreamTypeNode)
 	if err != nil {
-		return fmt.Errorf("load node aggregate: %w", err)
+		return fmt.Errorf("load node stream: %w", err)
+	}
+	aggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return fmt.Errorf("replay node aggregate: %w", err)
 	}
 
 	if err := aggregate.Create(ctx, stream, node.Payload, node.UID, node.SchemaID); err != nil {
@@ -108,7 +121,7 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 	}
 
 	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, e, e.StreamVersion-1); err != nil {
+		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
 			return fmt.Errorf("append node event: %w", err)
 		}
 	}
@@ -140,34 +153,40 @@ func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
 	}
 	defer tx.Rollback()
 
-	eventsRepo := events.NewRepository(tx)
+	eventsRepo := events.NewRepository()
 
-	fromAggregate, _, err := loadAggregate(ctx, eventsRepo, fromStreamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
-		return &nodes.Aggregate{}
-	})
+	fromStream, err := loadStream(ctx, eventsRepo, tx, fromStreamID, nodes.StreamTypeNode)
 	if err != nil {
-		return fmt.Errorf("load from node aggregate: %w", err)
+		return fmt.Errorf("load from node stream: %w", err)
+	}
+	fromAggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, fromAggregate, fromStream); err != nil {
+		return fmt.Errorf("replay from node aggregate: %w", err)
 	}
 	if !fromAggregate.Exists() {
 		return fmt.Errorf("from node does not exist: %s", fromID)
 	}
 
-	toAggregate, _, err := loadAggregate(ctx, eventsRepo, toStreamID, nodes.StreamTypeNode, func() *nodes.Aggregate {
-		return &nodes.Aggregate{}
-	})
+	toStream, err := loadStream(ctx, eventsRepo, tx, toStreamID, nodes.StreamTypeNode)
 	if err != nil {
-		return fmt.Errorf("load to node aggregate: %w", err)
+		return fmt.Errorf("load to node stream: %w", err)
+	}
+	toAggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, toAggregate, toStream); err != nil {
+		return fmt.Errorf("replay to node aggregate: %w", err)
 	}
 	if !toAggregate.Exists() {
 		return fmt.Errorf("to node does not exist: %s", toID)
 	}
 
 	streamID := links.StreamIDForPair(fromStreamID, toStreamID)
-	aggregate, stream, err := loadAggregate(ctx, eventsRepo, streamID, links.StreamTypeLink, func() *links.Aggregate {
-		return &links.Aggregate{}
-	})
+	stream, err := loadStream(ctx, eventsRepo, tx, streamID, links.StreamTypeLink)
 	if err != nil {
-		return fmt.Errorf("load link aggregate: %w", err)
+		return fmt.Errorf("load link stream: %w", err)
+	}
+	aggregate := &links.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return fmt.Errorf("replay link aggregate: %w", err)
 	}
 
 	if err := aggregate.Create(ctx, stream, fromStreamID, toStreamID); err != nil {
@@ -175,7 +194,7 @@ func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
 	}
 
 	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, e, e.StreamVersion-1); err != nil {
+		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
 			return fmt.Errorf("append link event: %w", err)
 		}
 	}
@@ -187,20 +206,85 @@ func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
 	return nil
 }
 
-func loadAggregate[T events.Aggregate](ctx context.Context, repo *events.Repository, streamID events.StreamID, streamType events.StreamType, newAggregate func() T) (T, *events.Stream, error) {
-	aggregate := newAggregate()
+func (s *Synapse) RunProjections(ctx context.Context) error {
+	projections := []projection{
+		schemas.NewProjection(),
+		nodes.NewProjection(),
+		links.NewProjection(),
+	}
 
-	streamEvents, err := repo.GetEventsByStream(ctx, streamID, 0)
+	for _, p := range projections {
+		if err := s.RunProjection(ctx, p); err != nil {
+			return fmt.Errorf("run projection %s: %w", p.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Synapse) RunProjection(ctx context.Context, p projection) error {
+	eventsRepo := events.NewRepository()
+	for {
+		lastPosition, err := eventsRepo.GetProjectionIterator(ctx, s.db, p.Name(), p.StreamType())
+		if err != nil {
+			return fmt.Errorf("get iterator: %w", err)
+		}
+
+		headPosition, err := eventsRepo.GetStreamTypeHeadGlobalPosition(ctx, s.db, p.StreamType())
+		if err != nil {
+			return fmt.Errorf("get head position: %w", err)
+		}
+		if lastPosition >= headPosition {
+			return nil
+		}
+
+		batch, err := eventsRepo.GetStreamEvents(ctx, s.db, p.StreamType(), lastPosition, 100)
+		if err != nil {
+			return fmt.Errorf("get events batch: %w", err)
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+
+		for _, e := range batch {
+			tx, err := s.db.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("begin projection transaction: %w", err)
+			}
+
+			if err := p.Project(ctx, tx, e); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("project event at global position %d: %w", e.GlobalPosition, err)
+			}
+
+			if err := eventsRepo.AdvanceProjectionIterator(ctx, tx, p.Name(), p.StreamType(), e.GlobalPosition, nowUnix()); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("advance iterator: %w", err)
+			}
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("commit projection transaction: %w", err)
+			}
+		}
+	}
+}
+
+func loadStream(ctx context.Context, repo *events.Repository, db sqlx.DB, streamID events.StreamID, streamType events.StreamType) (*events.Stream, error) {
+	streamEvents, err := repo.GetEventsByStream(ctx, db, streamID, 0)
 	if err != nil {
-		return aggregate, nil, err
+		return nil, err
 	}
 
-	stream := events.NewStream(streamID, streamType, streamEvents)
-	if err := stream.Init(ctx, aggregate); err != nil {
-		return aggregate, nil, err
-	}
+	return events.NewStream(streamID, streamType, streamEvents), nil
+}
 
-	return aggregate, stream, nil
+func replayAggregate(ctx context.Context, aggregate events.Aggregate, stream *events.Stream) error {
+	for _, event := range stream.AppliedEvents() {
+		if err := aggregate.Apply(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func nowUnix() int64 {
