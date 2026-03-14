@@ -51,15 +51,13 @@ WHERE id = 1;
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
-	if cfg.LogPath == "" {
-		cfg.LogPath = DefaultLogPath
-	}
-	return cfg, nil
+	return cfg.Normalize()
 }
 
 func (r *Repository) Upsert(ctx context.Context, cfg Config) error {
-	if cfg.LogPath == "" {
-		cfg.LogPath = DefaultLogPath
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return err
 	}
 
 	payload, err := json.Marshal(cfg)
