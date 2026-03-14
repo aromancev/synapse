@@ -36,29 +36,25 @@ func init() {
 }
 
 func configureLogging(ctx context.Context, dbPath string) error {
-	logPath, err := resolveLogPath(ctx, dbPath)
+	logger, err := resolveLogger(ctx, dbPath)
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return fmt.Errorf("create log directory: %w", err)
-	}
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	handler, cleanup, err := newLogHandler(logger)
 	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
+		return err
 	}
+	_ = cleanup
 
-	logger := slog.New(slog.NewJSONHandler(f, nil))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(handler))
 	return nil
 }
 
-func resolveLogPath(ctx context.Context, dbPath string) (string, error) {
+func resolveLogger(ctx context.Context, dbPath string) (config.Logger, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
-		return config.DefaultLogPath, nil
+		return config.DefaultLogger(), nil
 	}
 	defer db.Close()
 
@@ -66,9 +62,32 @@ func resolveLogPath(ctx context.Context, dbPath string) (string, error) {
 	cfg, err := repo.Get(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table: config") {
-			return config.DefaultLogPath, nil
+			return config.DefaultLogger(), nil
 		}
-		return "", err
+		return config.Logger{}, err
 	}
-	return cfg.LogPath, nil
+	return cfg.Logger, nil
+}
+
+func newLogHandler(logger config.Logger) (slog.Handler, func() error, error) {
+	switch logger.Type {
+	case config.LoggerTypeFile:
+		cfg, err := logger.FileConfig()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o755); err != nil {
+			return nil, nil, fmt.Errorf("create log directory: %w", err)
+		}
+
+		f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open log file: %w", err)
+		}
+
+		return slog.NewJSONHandler(f, nil), f.Close, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported logger type %q", logger.Type)
+	}
 }
