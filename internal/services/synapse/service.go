@@ -62,10 +62,8 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 		return fmt.Errorf("aggregate create schema: %w", err)
 	}
 
-	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
-			return fmt.Errorf("append schema event: %w", err)
-		}
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append schema events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -120,10 +118,8 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 		return fmt.Errorf("aggregate create node: %w", err)
 	}
 
-	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
-			return fmt.Errorf("append node event: %w", err)
-		}
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append node events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -193,10 +189,8 @@ func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
 		return fmt.Errorf("aggregate create link: %w", err)
 	}
 
-	for _, e := range stream.RecordedEvents() {
-		if err := eventsRepo.AppendEvent(ctx, tx, e, e.StreamVersion-1); err != nil {
-			return fmt.Errorf("append link event: %w", err)
-		}
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append link events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -281,6 +275,15 @@ func loadStream(ctx context.Context, repo *events.Repository, db sqlx.DB, stream
 func replayAggregate(ctx context.Context, aggregate events.Aggregate, stream *events.Stream) error {
 	for _, event := range stream.AppliedEvents() {
 		if err := aggregate.Apply(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func appendRecordedEvents(ctx context.Context, repo *events.Repository, db sqlx.DB, stream *events.Stream) error {
+	for _, event := range stream.RecordedEvents() {
+		if err := repo.AppendEvent(ctx, db, event, event.StreamVersion-1); err != nil {
 			return err
 		}
 	}
