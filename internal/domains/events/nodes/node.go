@@ -79,8 +79,7 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 
 // Node is a stored payload bound to a schema stream.
 type Node struct {
-	ID        int64           `json:"id"`
-	UID       ID              `json:"uid"`
+	ID        ID              `json:"id"`
 	SchemaID  events.StreamID `json:"schema_id"`
 	CreatedAt int64           `json:"created_at"`
 	Payload   json.RawMessage `json:"payload"`
@@ -104,8 +103,8 @@ func (n Node) Validate() []error {
 	var errs []error
 
 	var emptyID ID
-	if n.UID == emptyID {
-		errs = append(errs, errors.New("uid is required"))
+	if n.ID == emptyID {
+		errs = append(errs, errors.New("id is required"))
 	}
 
 	if err := n.SchemaID.Validate(); err != nil {

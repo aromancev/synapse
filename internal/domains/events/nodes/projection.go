@@ -43,7 +43,7 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		payload = payload.normalized()
 
 		return p.repo.UpsertNode(ctx, db, Node{
-			UID:       payload.UID,
+			ID:        payload.ID,
 			SchemaID:  payload.SchemaID,
 			CreatedAt: event.OccurredAt,
 			Payload:   payload.Payload,

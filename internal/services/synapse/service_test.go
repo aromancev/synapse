@@ -89,7 +89,7 @@ func TestSynapse_AddNode(t *testing.T) {
 
 		var payload map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(e.Payload, &payload))
-		assert.Contains(t, string(payload["uid"]), "node_")
+		assert.Contains(t, string(payload["id"]), "node_")
 		assert.JSONEq(t, `"`+schemaID.String()+`"`, string(payload["schema_id"]))
 		assert.JSONEq(t, `{"name":"Ada"}`, string(payload["payload"]))
 	})

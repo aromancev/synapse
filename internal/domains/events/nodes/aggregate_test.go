@@ -13,13 +13,13 @@ import (
 
 func TestAggregate_Create(t *testing.T) {
 	t.Run("records normalized node created event", func(t *testing.T) {
-		uid, err := NewID()
+		id, err := NewID()
 		require.NoError(t, err)
 
-		stream := events.NewStream(events.StreamID(uid.String()), StreamTypeNode, nil)
+		stream := events.NewStream(events.StreamID(id.String()), StreamTypeNode, nil)
 		aggregate := &Aggregate{}
 
-		err = aggregate.Create(context.Background(), stream, json.RawMessage(` { "name": "Ada" } `), uid, events.StreamID("  schema_01HXYZ  "))
+		err = aggregate.Create(context.Background(), stream, json.RawMessage(` { "name": "Ada" } `), id, events.StreamID("  schema_01HXYZ  "))
 		require.NoError(t, err)
 
 		recorded := stream.RecordedEvents()
@@ -33,7 +33,7 @@ func TestAggregate_Create(t *testing.T) {
 
 		var payload map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(e.Payload, &payload))
-		assert.JSONEq(t, `"`+uid.String()+`"`, string(payload["uid"]))
+		assert.JSONEq(t, `"`+id.String()+`"`, string(payload["id"]))
 		assert.JSONEq(t, `"schema_01HXYZ"`, string(payload["schema_id"]))
 		assert.JSONEq(t, `{"name":"Ada"}`, string(payload["payload"]))
 	})
