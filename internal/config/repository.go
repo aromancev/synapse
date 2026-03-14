@@ -1,4 +1,4 @@
-package settings
+package config
 
 import (
 	"context"
@@ -19,9 +19,9 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) Init(ctx context.Context) error {
 	const query = `
-CREATE TABLE IF NOT EXISTS settings (
+CREATE TABLE IF NOT EXISTS config (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
-	settings JSON NOT NULL
+	config JSON NOT NULL
 );
 `
 
@@ -32,10 +32,10 @@ CREATE TABLE IF NOT EXISTS settings (
 	return r.Upsert(ctx, newDefault())
 }
 
-func (r *Repository) Get(ctx context.Context) (Settings, error) {
+func (r *Repository) Get(ctx context.Context) (Config, error) {
 	const query = `
-SELECT settings
-FROM settings
+SELECT config
+FROM config
 WHERE id = 1;
 `
 
@@ -44,12 +44,12 @@ WHERE id = 1;
 		if err == sql.ErrNoRows {
 			return newDefault(), nil
 		}
-		return Settings{}, fmt.Errorf("get settings: %w", err)
+		return Config{}, fmt.Errorf("get config: %w", err)
 	}
 
-	var cfg Settings
+	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return Settings{}, fmt.Errorf("decode settings: %w", err)
+		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 	if cfg.LogPath == "" {
 		cfg.LogPath = DefaultLogPath
@@ -57,24 +57,24 @@ WHERE id = 1;
 	return cfg, nil
 }
 
-func (r *Repository) Upsert(ctx context.Context, cfg Settings) error {
+func (r *Repository) Upsert(ctx context.Context, cfg Config) error {
 	if cfg.LogPath == "" {
 		cfg.LogPath = DefaultLogPath
 	}
 
 	payload, err := json.Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("encode settings: %w", err)
+		return fmt.Errorf("encode config: %w", err)
 	}
 
 	const query = `
-INSERT INTO settings(id, settings)
+INSERT INTO config(id, config)
 VALUES(1, ?)
-ON CONFLICT(id) DO UPDATE SET settings = excluded.settings;
+ON CONFLICT(id) DO UPDATE SET config = excluded.config;
 `
 
 	if _, err := r.db.ExecContext(ctx, query, payload); err != nil {
-		return fmt.Errorf("upsert settings: %w", err)
+		return fmt.Errorf("upsert config: %w", err)
 	}
 	return nil
 }
