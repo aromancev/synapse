@@ -132,74 +132,21 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 }
 
 func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
-	fromStreamID := events.StreamID(fromID.String())
-	toStreamID := events.StreamID(toID.String())
-	fromStreamID, toStreamID = normalizeLinkPair(fromStreamID, toStreamID)
-	if err := fromStreamID.Validate(); err != nil {
-		return fmt.Errorf("from: %w", err)
-	}
-	if err := toStreamID.Validate(); err != nil {
-		return fmt.Errorf("to: %w", err)
-	}
-	if fromStreamID == toStreamID {
-		return errors.New("from and to must be different")
-	}
+	return s.mutateLink(ctx, fromID, toID, func(aggregate *links.Aggregate, stream *events.Stream, fromStreamID, toStreamID events.StreamID) error {
+		if err := aggregate.Create(ctx, stream, fromStreamID, toStreamID); err != nil {
+			return fmt.Errorf("aggregate create link: %w", err)
+		}
+		return nil
+	})
+}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	eventsRepo := events.NewRepository()
-
-	fromStream, err := loadStream(ctx, eventsRepo, tx, fromStreamID, nodes.StreamTypeNode)
-	if err != nil {
-		return fmt.Errorf("load from node stream: %w", err)
-	}
-	fromAggregate := &nodes.Aggregate{}
-	if err := replayAggregate(ctx, fromAggregate, fromStream); err != nil {
-		return fmt.Errorf("replay from node aggregate: %w", err)
-	}
-	if !fromAggregate.Exists() {
-		return fmt.Errorf("from node does not exist: %s", fromID)
-	}
-
-	toStream, err := loadStream(ctx, eventsRepo, tx, toStreamID, nodes.StreamTypeNode)
-	if err != nil {
-		return fmt.Errorf("load to node stream: %w", err)
-	}
-	toAggregate := &nodes.Aggregate{}
-	if err := replayAggregate(ctx, toAggregate, toStream); err != nil {
-		return fmt.Errorf("replay to node aggregate: %w", err)
-	}
-	if !toAggregate.Exists() {
-		return fmt.Errorf("to node does not exist: %s", toID)
-	}
-
-	streamID := links.StreamIDForPair(fromStreamID, toStreamID)
-	stream, err := loadStream(ctx, eventsRepo, tx, streamID, links.StreamTypeLink)
-	if err != nil {
-		return fmt.Errorf("load link stream: %w", err)
-	}
-	aggregate := &links.Aggregate{}
-	if err := replayAggregate(ctx, aggregate, stream); err != nil {
-		return fmt.Errorf("replay link aggregate: %w", err)
-	}
-
-	if err := aggregate.Create(ctx, stream, fromStreamID, toStreamID); err != nil {
-		return fmt.Errorf("aggregate create link: %w", err)
-	}
-
-	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
-		return fmt.Errorf("append link events: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
+func (s *Synapse) UnlinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
+	return s.mutateLink(ctx, fromID, toID, func(aggregate *links.Aggregate, stream *events.Stream, fromStreamID, toStreamID events.StreamID) error {
+		if err := aggregate.Remove(ctx, stream, fromStreamID, toStreamID); err != nil {
+			return fmt.Errorf("aggregate remove link: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Synapse) RunProjections(ctx context.Context) error {
@@ -394,4 +341,75 @@ func normalizeLinkPair(from, to events.StreamID) (events.StreamID, events.Stream
 		from, to = to, from
 	}
 	return from, to
+}
+
+func (s *Synapse) mutateLink(ctx context.Context, fromID, toID nodes.ID, mutate func(aggregate *links.Aggregate, stream *events.Stream, fromStreamID, toStreamID events.StreamID) error) error {
+	fromStreamID := events.StreamID(fromID.String())
+	toStreamID := events.StreamID(toID.String())
+	fromStreamID, toStreamID = normalizeLinkPair(fromStreamID, toStreamID)
+	if err := fromStreamID.Validate(); err != nil {
+		return fmt.Errorf("from: %w", err)
+	}
+	if err := toStreamID.Validate(); err != nil {
+		return fmt.Errorf("to: %w", err)
+	}
+	if fromStreamID == toStreamID {
+		return errors.New("from and to must be different")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository()
+
+	fromStream, err := loadStream(ctx, eventsRepo, tx, fromStreamID, nodes.StreamTypeNode)
+	if err != nil {
+		return fmt.Errorf("load from node stream: %w", err)
+	}
+	fromAggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, fromAggregate, fromStream); err != nil {
+		return fmt.Errorf("replay from node aggregate: %w", err)
+	}
+	if !fromAggregate.Exists() {
+		return fmt.Errorf("from node does not exist: %s", fromID)
+	}
+
+	toStream, err := loadStream(ctx, eventsRepo, tx, toStreamID, nodes.StreamTypeNode)
+	if err != nil {
+		return fmt.Errorf("load to node stream: %w", err)
+	}
+	toAggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, toAggregate, toStream); err != nil {
+		return fmt.Errorf("replay to node aggregate: %w", err)
+	}
+	if !toAggregate.Exists() {
+		return fmt.Errorf("to node does not exist: %s", toID)
+	}
+
+	streamID := links.StreamIDForPair(fromStreamID, toStreamID)
+	stream, err := loadStream(ctx, eventsRepo, tx, streamID, links.StreamTypeLink)
+	if err != nil {
+		return fmt.Errorf("load link stream: %w", err)
+	}
+	aggregate := &links.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return fmt.Errorf("replay link aggregate: %w", err)
+	}
+
+	if err := mutate(aggregate, stream, fromStreamID, toStreamID); err != nil {
+		return err
+	}
+
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append link events: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
