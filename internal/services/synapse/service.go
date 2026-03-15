@@ -311,6 +311,38 @@ func (s *Synapse) RunReplicator(ctx context.Context, r replicators.Replicator) e
 	}
 }
 
+func (s *Synapse) Restore(ctx context.Context, replicatorName string) error {
+	eventsRepo := events.NewRepository()
+	headPosition, err := eventsRepo.GetHeadGlobalPosition(ctx, s.db)
+	if err != nil {
+		return fmt.Errorf("get head position: %w", err)
+	}
+	if headPosition != 0 {
+		return errors.New("event store must be empty before restore")
+	}
+
+	replicator, ok := s.replicatorByName(replicatorName)
+	if !ok {
+		return fmt.Errorf("replicator %q not found", replicatorName)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin restore transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := replicator.Restore(ctx, eventsRepo, tx); err != nil {
+		return fmt.Errorf("restore from replicator %s: %w", replicator.Name(), err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit restore transaction: %w", err)
+	}
+
+	return nil
+}
+
 func loadStream(ctx context.Context, repo *events.Repository, db sqlx.DB, streamID events.StreamID, streamType events.StreamType) (*events.Stream, error) {
 	streamEvents, err := repo.GetEventsByStream(ctx, db, streamID, 0)
 	if err != nil {
@@ -336,6 +368,19 @@ func appendRecordedEvents(ctx context.Context, repo *events.Repository, db sqlx.
 		}
 	}
 	return nil
+}
+
+func replicatorByName(replicators []replicators.Replicator, name string) (replicators.Replicator, bool) {
+	for _, replicator := range replicators {
+		if replicator.Name() == name {
+			return replicator, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Synapse) replicatorByName(name string) (replicators.Replicator, bool) {
+	return replicatorByName(s.replicators, name)
 }
 
 func nowUnix() int64 {

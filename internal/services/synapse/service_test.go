@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ import (
 func newTestService(t *testing.T, reps ...replicators.Replicator) (*Synapse, *events.Repository, *sql.DB) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), time.Now().UnixNano()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -247,6 +248,55 @@ func TestSynapse_RunReplicators(t *testing.T) {
 		lines = strings.Split(strings.TrimSpace(string(data)), "\n")
 		require.Len(t, lines, 4)
 		assert.Equal(t, schemaID.String(), mustReadReplicatedEvent(t, lines[0]).StreamID.String())
+	})
+}
+
+func TestSynapse_Restore(t *testing.T) {
+	t.Run("restores events from named replicator into an empty database", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "replica.jsonl")
+		rep := replicators.NewFile("events_jsonl", path)
+		sourceSvc, sourceEventsRepo, sourceDB := newTestService(t, rep)
+		schemaID, fromID, toID := seedTwoNodes(t, sourceSvc, sourceEventsRepo, sourceDB)
+		require.NoError(t, sourceSvc.LinkNodes(context.Background(), fromID, toID))
+		require.NoError(t, sourceSvc.RunReplicators(context.Background()))
+
+		targetRep := replicators.NewFile("events_jsonl", path)
+		targetSvc, targetEventsRepo, targetDB := newTestService(t, targetRep)
+		require.NoError(t, targetSvc.Restore(context.Background(), "events_jsonl"))
+
+		sourceEvents, err := sourceEventsRepo.GetStreamEvents(context.Background(), sourceDB, "", 0, 100)
+		require.NoError(t, err)
+		targetEvents, err := targetEventsRepo.GetStreamEvents(context.Background(), targetDB, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, targetEvents, len(sourceEvents))
+		assert.Equal(t, sourceEvents, targetEvents)
+
+		require.NoError(t, targetSvc.RunProjections(context.Background()))
+		nodesRepo := nodes.NewProjectionRepository()
+		storedNodes, err := nodesRepo.GetNodesBySchemaID(context.Background(), targetDB, schemaID, 10)
+		require.NoError(t, err)
+		require.Len(t, storedNodes, 2)
+	})
+
+	t.Run("fails when event store is not empty", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "replica.jsonl")
+		rep := replicators.NewFile("events_jsonl", path)
+		sourceSvc, sourceEventsRepo, sourceDB := newTestService(t, rep)
+		_, fromID, toID := seedTwoNodes(t, sourceSvc, sourceEventsRepo, sourceDB)
+		require.NoError(t, sourceSvc.LinkNodes(context.Background(), fromID, toID))
+		require.NoError(t, sourceSvc.RunReplicators(context.Background()))
+
+		targetSvc, _, _ := newTestService(t, replicators.NewFile("events_jsonl", path))
+		require.NoError(t, targetSvc.AddSchema(context.Background(), "person", `{"type":"object"}`))
+
+		err := targetSvc.Restore(context.Background(), "events_jsonl")
+		require.ErrorContains(t, err, "event store must be empty")
+	})
+
+	t.Run("fails when replicator is not found", func(t *testing.T) {
+		svc, _, _ := newTestService(t)
+		err := svc.Restore(context.Background(), "missing")
+		require.ErrorContains(t, err, `replicator "missing" not found`)
 	})
 }
 
