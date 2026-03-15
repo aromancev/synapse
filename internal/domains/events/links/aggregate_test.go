@@ -61,3 +61,56 @@ func TestAggregate_Create(t *testing.T) {
 		require.EqualError(t, err, "link already exists")
 	})
 }
+
+func TestAggregate_Remove(t *testing.T) {
+	t.Run("records normalized link removed event", func(t *testing.T) {
+		from := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+		to := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAW")
+
+		stream := events.NewStream(StreamIDForPair(from, to), StreamTypeLink, nil)
+		aggregate := &Aggregate{}
+		require.NoError(t, aggregate.Create(context.Background(), stream, from, to))
+		replayAggregate(t, aggregate, events.NewStream(StreamIDForPair(from, to), StreamTypeLink, stream.RecordedEvents()))
+
+		err := aggregate.Remove(context.Background(), stream, to, from)
+		require.NoError(t, err)
+
+		recorded := stream.RecordedEvents()
+		require.Len(t, recorded, 2)
+		e := recorded[1]
+		assert.Equal(t, EventTypeLinkRemoved, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(e.Payload, &payload))
+		assert.Equal(t, from.String(), payload["from"])
+		assert.Equal(t, to.String(), payload["to"])
+	})
+
+	t.Run("refuses removing a missing link", func(t *testing.T) {
+		from := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+		to := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAW")
+
+		stream := events.NewStream(StreamIDForPair(from, to), StreamTypeLink, nil)
+		aggregate := &Aggregate{}
+		err := aggregate.Remove(context.Background(), stream, from, to)
+		require.EqualError(t, err, "link does not exist")
+	})
+
+	t.Run("replays removed event and clears aggregate state", func(t *testing.T) {
+		from := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+		to := events.StreamID("node_01ARZ3NDEKTSV4RRFFQ69G5FAW")
+
+		stream := events.NewStream(StreamIDForPair(from, to), StreamTypeLink, nil)
+		aggregate := &Aggregate{}
+		require.NoError(t, aggregate.Create(context.Background(), stream, from, to))
+		replayAggregate(t, aggregate, events.NewStream(StreamIDForPair(from, to), StreamTypeLink, stream.RecordedEvents()))
+		require.NoError(t, aggregate.Remove(context.Background(), stream, from, to))
+
+		replayed := &Aggregate{}
+		replayAggregate(t, replayed, events.NewStream(StreamIDForPair(from, to), StreamTypeLink, stream.RecordedEvents()))
+		assert.False(t, replayed.Exists())
+		assert.Empty(t, replayed.from)
+		assert.Empty(t, replayed.to)
+	})
+}

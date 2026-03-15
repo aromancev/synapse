@@ -48,6 +48,16 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 			Weight:    1,
 			CreatedAt: event.OccurredAt,
 		})
+	case EventTypeLinkRemoved:
+		var payload removedEvent
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("unmarshal link.removed payload: %w", err)
+		}
+		payload = payload.normalized()
+		if err := p.repo.DeleteLink(ctx, db, payload.From, payload.To); err != nil {
+			return fmt.Errorf("delete link: %w", err)
+		}
+		return nil
 	default:
 		return nil
 	}

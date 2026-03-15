@@ -72,6 +72,18 @@ func TestRepository(t *testing.T) {
 		assert.Equal(t, int64(1700000010), links[0].CreatedAt)
 	})
 
+	t.Run("DeleteLink removes existing normalized link", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+
+		require.NoError(t, repo.UpsertLink(ctx, db, Link{From: from1, To: to2, Weight: 0.2, CreatedAt: 1700000000}))
+		require.NoError(t, repo.DeleteLink(ctx, db, to2, from1))
+
+		links, err := repo.GetLinksFrom(ctx, db, []events.StreamID{from1}, 10)
+		require.NoError(t, err)
+		require.Empty(t, links)
+	})
+
 	t.Run("UpsertLink fails for missing created_at", func(t *testing.T) {
 		repo, db := newTestRepository(t)
 		err := repo.UpsertLink(context.Background(), db, Link{From: from1, To: to2, Weight: 0.2})

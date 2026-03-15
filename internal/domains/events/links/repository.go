@@ -52,6 +52,29 @@ ON CONFLICT("from", "to") DO UPDATE SET
 	return nil
 }
 
+func (r *ProjectionRepository) DeleteLink(ctx context.Context, db sqlx.DB, from, to events.StreamID) error {
+	from, to = normalizePair(from, to)
+	if err := from.Validate(); err != nil {
+		return fmt.Errorf("from: %w", err)
+	}
+	if err := to.Validate(); err != nil {
+		return fmt.Errorf("to: %w", err)
+	}
+	if from == to {
+		return errors.New("from and to must be different")
+	}
+
+	const query = `
+DELETE FROM links
+WHERE "from" = ? AND "to" = ?;
+`
+	if _, err := db.ExecContext(ctx, query, from, to); err != nil {
+		return fmt.Errorf("delete link: %w", err)
+	}
+
+	return nil
+}
+
 func (r *ProjectionRepository) GetLinksFrom(ctx context.Context, db sqlx.DB, fromIDs []events.StreamID, limit int) ([]Link, error) {
 	if len(fromIDs) == 0 {
 		return nil, nil

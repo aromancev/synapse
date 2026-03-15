@@ -171,6 +171,48 @@ func TestSynapse_LinkNodes(t *testing.T) {
 	})
 }
 
+func TestSynapse_UnlinkNodes(t *testing.T) {
+	t.Run("appends one undirected unlink event", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t)
+		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
+		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
+
+		before := time.Now().Unix()
+		err := svc.UnlinkNodes(context.Background(), toID, fromID)
+		after := time.Now().Unix()
+		require.NoError(t, err)
+
+		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, eventsInStream, 5)
+
+		e := eventsInStream[4]
+		assert.Equal(t, links.StreamTypeLink, e.StreamType)
+		assert.Equal(t, links.EventTypeLinkRemoved, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+		assert.Equal(t, links.StreamIDForPair(events.StreamID(fromID.String()), events.StreamID(toID.String())), e.StreamID)
+		assert.GreaterOrEqual(t, e.OccurredAt, before)
+		assert.LessOrEqual(t, e.OccurredAt, after)
+
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(e.Payload, &payload))
+		assert.Equal(t, fromID.String(), payload["from"])
+		assert.Equal(t, toID.String(), payload["to"])
+	})
+
+	t.Run("fails when link does not exist", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t)
+		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
+
+		err := svc.UnlinkNodes(context.Background(), fromID, toID)
+		require.ErrorContains(t, err, "link does not exist")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 3)
+	})
+}
+
 func TestSynapse_RunProjections(t *testing.T) {
 	t.Run("catches up all projections and persists iterators", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t)
@@ -180,6 +222,7 @@ func TestSynapse_RunProjections(t *testing.T) {
 
 		schemaID, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
+		require.NoError(t, svc.UnlinkNodes(context.Background(), fromID, toID))
 
 		require.NoError(t, svc.RunProjections(context.Background()))
 
@@ -194,9 +237,7 @@ func TestSynapse_RunProjections(t *testing.T) {
 
 		storedLinks, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{events.StreamID(fromID.String()), events.StreamID(toID.String())}, 10)
 		require.NoError(t, err)
-		require.Len(t, storedLinks, 1)
-		assert.Equal(t, events.StreamID(fromID.String()), storedLinks[0].From)
-		assert.Equal(t, events.StreamID(toID.String()), storedLinks[0].To)
+		require.Empty(t, storedLinks)
 
 		schemaPos, err := eventsRepo.GetProjectionIterator(context.Background(), db, schemas.ProjectionName, schemas.StreamTypeSchema)
 		require.NoError(t, err)
@@ -212,7 +253,7 @@ func TestSynapse_RunProjections(t *testing.T) {
 
 		storedLinksAgain, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{events.StreamID(fromID.String())}, 10)
 		require.NoError(t, err)
-		require.Len(t, storedLinksAgain, 1)
+		require.Empty(t, storedLinksAgain)
 	})
 }
 
