@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "synapse-config.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["logging", "replication"],
+  "properties": {
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logger"],
+      "properties": {
+        "logger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "config"],
+          "properties": {
+            "type": {
+              "const": "file"
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^\\S(?:.*\\S)?$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "replication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "replicator"],
+      "properties": {
+        "mode": {
+          "enum": ["disabled", "auto", "manual"]
+        },
+        "replicator": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["name", "type", "config"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+            },
+            "type": {
+              "const": "file"
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^\\S(?:.*\\S)?$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

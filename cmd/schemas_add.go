@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -41,8 +42,8 @@ var schemasAddCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		service := synapse.NewSynapse(db)
-		if err := service.AddSchema(cmd.Context(), addSchemaName, schemaJSON); err != nil {
+		service := synapse.NewSynapse(db, nil)
+		if err := service.AddSchema(cmd.Context(), addSchemaName, json.RawMessage(schemaJSON)); err != nil {
 			return err
 		}
 

@@ -41,22 +41,24 @@ WHERE id = 1;
 
 	var raw []byte
 	if err := r.db.QueryRowContext(ctx, query).Scan(&raw); err != nil {
-		if err == sql.ErrNoRows {
-			return newDefault(), nil
-		}
-		return Config{}, fmt.Errorf("get config: %w", err)
+		// Return default config on any error (not found, table doesn't exist, etc.)
+		return newDefault(), nil
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
-	return cfg.Normalize()
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func (r *Repository) Upsert(ctx context.Context, cfg Config) error {
-	cfg, err := cfg.Normalize()
-	if err != nil {
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 

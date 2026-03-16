@@ -19,11 +19,12 @@ func TestRepository(t *testing.T) {
 		cfg, err := repo.Get(context.Background())
 		require.NoError(t, err)
 
-		fileCfg, err := cfg.Logger.FileConfig()
+		fileCfg, err := cfg.Logging.Logger.FileConfig()
 		require.NoError(t, err)
-		require.Equal(t, LoggerTypeFile, cfg.Logger.Type)
+		require.Equal(t, LoggerTypeFile, cfg.Logging.Logger.Type)
 		require.Equal(t, DefaultLogPath, fileCfg.Path)
-		require.Empty(t, cfg.Replicators)
+		require.Equal(t, ReplicationModeDisabled, cfg.Replication.Mode)
+		require.Nil(t, cfg.Replication.Replicator)
 	})
 
 	t.Run("upsert normalizes file logger config and replicators", func(t *testing.T) {
@@ -32,38 +33,39 @@ func TestRepository(t *testing.T) {
 
 		require.NoError(t, repo.Init(context.Background()))
 		require.NoError(t, repo.Upsert(context.Background(), Config{
-			Logger: Logger{Type: LoggerTypeFile},
-			Replicators: []Replicator{{
-				Name: "events_jsonl",
-				Type: ReplicatorTypeFile,
-			}},
+			Logging: Logging{Logger: Logger{Type: LoggerTypeFile}},
+			Replication: Replication{
+				Mode: ReplicationModeAuto,
+				Replicator: &Replicator{
+					Name: "events_jsonl",
+					Type: ReplicatorTypeFile,
+				},
+			},
 		}))
 
 		cfg, err := repo.Get(context.Background())
 		require.NoError(t, err)
 
-		fileCfg, err := cfg.Logger.FileConfig()
+		fileCfg, err := cfg.Logging.Logger.FileConfig()
 		require.NoError(t, err)
 		require.Equal(t, DefaultLogPath, fileCfg.Path)
-		require.Len(t, cfg.Replicators, 1)
+		require.Equal(t, ReplicationModeAuto, cfg.Replication.Mode)
+		require.NotNil(t, cfg.Replication.Replicator)
 
-		replicatorCfg, err := cfg.Replicators[0].FileConfig()
+		replicatorCfg, err := cfg.Replication.Replicator.FileConfig()
 		require.NoError(t, err)
 		require.Equal(t, DefaultReplicatorFilePath, replicatorCfg.Path)
 	})
 
-	t.Run("upsert rejects duplicate replicator names", func(t *testing.T) {
+	t.Run("upsert rejects unsupported replication mode", func(t *testing.T) {
 		db := openTestDB(t)
 		repo := NewRepository(db)
 
 		require.NoError(t, repo.Init(context.Background()))
 		err := repo.Upsert(context.Background(), Config{
-			Replicators: []Replicator{
-				{Name: "events_jsonl", Type: ReplicatorTypeFile},
-				{Name: "events_jsonl", Type: ReplicatorTypeFile},
-			},
+			Replication: Replication{Mode: ReplicationMode("weird")},
 		})
-		require.ErrorContains(t, err, "duplicate replicator name")
+		require.ErrorContains(t, err, "validate config")
 	})
 }
 

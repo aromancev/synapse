@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/spf13/cobra"
@@ -61,12 +60,10 @@ func resolveLogger(ctx context.Context, dbPath string) (config.Logger, error) {
 	repo := config.NewRepository(db)
 	cfg, err := repo.Get(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table: config") {
-			return config.DefaultLogger(), nil
-		}
-		return config.Logger{}, err
+		// Return default logger on any error
+		return config.DefaultLogger(), nil
 	}
-	return cfg.Logger, nil
+	return cfg.Logging.Logger, nil
 }
 
 func newLogHandler(logger config.Logger) (slog.Handler, func() error, error) {
