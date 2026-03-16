@@ -1,30 +1,52 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
+
+//go:embed schema.json
+var configSchemaJSON string
 
 const (
 	DefaultLogPath            = ".synapse/log.jsonl"
 	DefaultReplicatorFilePath = ".synapse/replica.jsonl"
+	configSchemaURL           = "synapse-config.schema.json"
 )
 
 type LoggerType string
 
 type ReplicatorType string
 
+type ReplicationMode string
+
 const (
 	LoggerTypeFile LoggerType = "file"
 
 	ReplicatorTypeFile ReplicatorType = "file"
+
+	ReplicationModeDisabled ReplicationMode = "disabled"
+	ReplicationModeAuto     ReplicationMode = "auto"
+	ReplicationModeManual   ReplicationMode = "manual"
 )
 
 // Config contains global synapse configuration persisted in the database.
 type Config struct {
-	Logger      Logger       `json:"logger"`
-	Replicators []Replicator `json:"replicators,omitempty"`
+	Logging     Logging     `json:"logging"`
+	Replication Replication `json:"replication"`
+}
+
+type Logging struct {
+	Logger Logger `json:"logger"`
+}
+
+type Replication struct {
+	Mode       ReplicationMode `json:"mode"`
+	Replicator *Replicator     `json:"replicator"`
 }
 
 type Logger struct {
@@ -48,65 +70,65 @@ type FileReplicatorConfig struct {
 
 func newDefault() Config {
 	return Config{
-		Logger:      DefaultLogger(),
-		Replicators: []Replicator{},
+		Logging:     Logging{Logger: mustNewLogger(LoggerTypeFile, FileLoggerConfig{Path: DefaultLogPath})},
+		Replication: Replication{Mode: ReplicationModeDisabled, Replicator: nil},
 	}
+}
+
+func DefaultConfig() Config {
+	return newDefault()
+}
+
+func DefaultReplication() Replication {
+	return Replication{Mode: ReplicationModeDisabled, Replicator: nil}
 }
 
 func DefaultLogger() Logger {
 	return mustNewLogger(LoggerTypeFile, FileLoggerConfig{Path: DefaultLogPath})
 }
 
-func mustNewLogger(t LoggerType, cfg any) Logger {
-	payload, err := json.Marshal(cfg)
-	if err != nil {
-		panic(fmt.Errorf("marshal logger config: %w", err))
-	}
+func mustNewLogger(t LoggerType, cfg FileLoggerConfig) Logger {
+	payload, _ := json.Marshal(cfg)
 	return Logger{Type: t, Config: payload}
 }
 
-func mustNewReplicator(name string, t ReplicatorType, cfg any) Replicator {
-	payload, err := json.Marshal(cfg)
-	if err != nil {
-		panic(fmt.Errorf("marshal replicator config: %w", err))
-	}
-	return Replicator{Name: name, Type: t, Config: payload}
+func NewFileLogger(cfg FileLoggerConfig) Logger {
+	return mustNewLogger(LoggerTypeFile, cfg)
 }
 
-func (c Config) Normalize() (Config, error) {
-	if c.Logger.Type == "" {
-		c.Logger = newDefault().Logger
-	}
-
-	logger, err := c.Logger.Normalize()
-	if err != nil {
-		return Config{}, err
-	}
-	c.Logger = logger
-
-	if c.Replicators == nil {
-		c.Replicators = []Replicator{}
-	}
-
-	normalizedReplicators := make([]Replicator, 0, len(c.Replicators))
-	seenNames := make(map[string]struct{}, len(c.Replicators))
-	for _, r := range c.Replicators {
-		normalized, err := r.Normalize()
-		if err != nil {
-			return Config{}, err
-		}
-		if _, exists := seenNames[normalized.Name]; exists {
-			return Config{}, fmt.Errorf("duplicate replicator name %q", normalized.Name)
-		}
-		seenNames[normalized.Name] = struct{}{}
-		normalizedReplicators = append(normalizedReplicators, normalized)
-	}
-	c.Replicators = normalizedReplicators
-
-	return c, nil
+func NewFileReplicator(name string, cfg FileReplicatorConfig) Replicator {
+	payload, _ := json.Marshal(cfg)
+	return Replicator{Name: name, Type: ReplicatorTypeFile, Config: payload}
 }
 
-func (l Logger) Normalize() (Logger, error) {
+func (c Config) Normalize() Config {
+	defaults := newDefault()
+	if c.Logging.Logger.Type == "" {
+		c.Logging.Logger = defaults.Logging.Logger
+	}
+
+	c.Logging.Logger = c.Logging.Logger.Normalize()
+	c.Replication = c.Replication.Normalize()
+
+	return c
+}
+
+func (r Replication) Normalize() Replication {
+	if r.Mode == "" {
+		r.Mode = ReplicationModeDisabled
+	}
+
+	if r.Replicator == nil {
+		return r
+	}
+
+	normalized := r.Replicator.Normalize()
+	r.Replicator = &normalized
+
+	return r
+}
+
+func (l Logger) Normalize() Logger {
 	if l.Type == "" {
 		l.Type = LoggerTypeFile
 	}
@@ -115,24 +137,20 @@ func (l Logger) Normalize() (Logger, error) {
 	case LoggerTypeFile:
 		cfg := FileLoggerConfig{Path: DefaultLogPath}
 		if len(l.Config) > 0 {
-			if err := json.Unmarshal(l.Config, &cfg); err != nil {
-				return Logger{}, fmt.Errorf("decode file logger config: %w", err)
-			}
+			_ = json.Unmarshal(l.Config, &cfg)
 		}
 		if cfg.Path == "" {
 			cfg.Path = DefaultLogPath
 		}
-		return mustNewLogger(LoggerTypeFile, cfg), nil
+		return NewFileLogger(cfg)
 	default:
-		return Logger{}, fmt.Errorf("unsupported logger type %q", l.Type)
+		// unknown type, return as-is for validation to catch
+		return l
 	}
 }
 
-func (r Replicator) Normalize() (Replicator, error) {
+func (r Replicator) Normalize() Replicator {
 	r.Name = strings.TrimSpace(r.Name)
-	if r.Name == "" {
-		return Replicator{}, fmt.Errorf("replicator name is required")
-	}
 	if r.Type == "" {
 		r.Type = ReplicatorTypeFile
 	}
@@ -141,16 +159,15 @@ func (r Replicator) Normalize() (Replicator, error) {
 	case ReplicatorTypeFile:
 		cfg := FileReplicatorConfig{Path: DefaultReplicatorFilePath}
 		if len(r.Config) > 0 {
-			if err := json.Unmarshal(r.Config, &cfg); err != nil {
-				return Replicator{}, fmt.Errorf("decode file replicator config: %w", err)
-			}
+			_ = json.Unmarshal(r.Config, &cfg)
 		}
 		if cfg.Path == "" {
 			cfg.Path = DefaultReplicatorFilePath
 		}
-		return mustNewReplicator(r.Name, ReplicatorTypeFile, cfg), nil
+		return NewFileReplicator(r.Name, cfg)
 	default:
-		return Replicator{}, fmt.Errorf("unsupported replicator type %q", r.Type)
+		// unknown type, return as-is for validation to catch
+		return r
 	}
 }
 
@@ -188,4 +205,43 @@ func (r Replicator) FileConfig() (FileReplicatorConfig, error) {
 		cfg.Path = DefaultReplicatorFilePath
 	}
 	return cfg, nil
+}
+
+func (c Config) Validate() error {
+	schema, err := compileSchema()
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal config for validation: %w", err)
+	}
+
+	var doc any
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return fmt.Errorf("decode config for validation: %w", err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
+
+	return nil
+}
+
+func compileSchema() (*jsonschema.Schema, error) {
+	compiler := jsonschema.NewCompiler()
+
+	var schemaDoc any
+	if err := json.Unmarshal([]byte(configSchemaJSON), &schemaDoc); err != nil {
+		return nil, fmt.Errorf("decode config schema: %w", err)
+	}
+	if err := compiler.AddResource(configSchemaURL, schemaDoc); err != nil {
+		return nil, fmt.Errorf("add config schema resource: %w", err)
+	}
+	schema, err := compiler.Compile(configSchemaURL)
+	if err != nil {
+		return nil, fmt.Errorf("compile config schema: %w", err)
+	}
+	return schema, nil
 }

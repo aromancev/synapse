@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newTestService(t *testing.T, reps ...replicators.Replicator) (*Synapse, *events.Repository, *sql.DB) {
+func newTestService(t *testing.T, rep replicators.Replicator) (*Synapse, *events.Repository, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), time.Now().UnixNano()))
@@ -34,14 +34,14 @@ func newTestService(t *testing.T, reps ...replicators.Replicator) (*Synapse, *ev
 	require.NoError(t, nodes.NewProjectionRepository().Init(context.Background(), db))
 	require.NoError(t, links.NewProjectionRepository().Init(context.Background(), db))
 
-	return NewSynapse(db, reps...), eventsRepo, db
+	return NewSynapse(db, rep), eventsRepo, db
 }
 
 func TestSynapse_AddSchema(t *testing.T) {
 	t.Run("normalizes validates and appends schema event", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 
-		err := svc.AddSchema(context.Background(), "  person  ", " { \"type\": \"object\" } ")
+		err := svc.AddSchema(context.Background(), "  person  ", json.RawMessage(" { \"type\": \"object\" } "))
 		require.NoError(t, err)
 
 		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -65,16 +65,17 @@ func TestSynapse_AddSchema(t *testing.T) {
 
 func TestSynapse_AddNode(t *testing.T) {
 	t.Run("normalizes validates and appends node event", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
-		schemaID := seedEvents[0].StreamID
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
 
 		before := time.Now().Unix()
-		err = svc.AddNode(context.Background(), schemaID, " { \"name\": \"Ada\" } ")
+		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(" { \"name\": \"Ada\" } "))
 		after := time.Now().Unix()
 		require.NoError(t, err)
 
@@ -99,14 +100,16 @@ func TestSynapse_AddNode(t *testing.T) {
 	})
 
 	t.Run("fails when payload does not match schema", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
 
-		err = svc.AddNode(context.Background(), seedEvents[0].StreamID, `{"age":42}`)
+		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"age":42}`))
 		require.Error(t, err)
 
 		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -117,7 +120,7 @@ func TestSynapse_AddNode(t *testing.T) {
 
 func TestSynapse_LinkNodes(t *testing.T) {
 	t.Run("appends one undirected link event", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 
 		before := time.Now().Unix()
@@ -133,7 +136,7 @@ func TestSynapse_LinkNodes(t *testing.T) {
 		assert.Equal(t, links.StreamTypeLink, e.StreamType)
 		assert.Equal(t, links.EventTypeLinkCreated, e.EventType)
 		assert.Equal(t, int64(1), e.StreamVersion)
-		assert.Equal(t, links.StreamIDForPair(events.StreamID(fromID.String()), events.StreamID(toID.String())), e.StreamID)
+		assert.Equal(t, links.StreamIDForPair(fromID.StreamID(), toID.StreamID()), e.StreamID)
 		assert.GreaterOrEqual(t, e.OccurredAt, before)
 		assert.LessOrEqual(t, e.OccurredAt, after)
 
@@ -144,7 +147,7 @@ func TestSynapse_LinkNodes(t *testing.T) {
 	})
 
 	t.Run("fails when either node does not exist", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		_, fromID, _ := seedTwoNodes(t, svc, eventsRepo, db)
 		missing, err := nodes.ParseID("node_01ARZ3NDEKTSV4RRFFQ69G5FAX")
 		require.NoError(t, err)
@@ -158,7 +161,7 @@ func TestSynapse_LinkNodes(t *testing.T) {
 	})
 
 	t.Run("fails when undirected link already exists", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 
 		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
@@ -173,7 +176,7 @@ func TestSynapse_LinkNodes(t *testing.T) {
 
 func TestSynapse_UnlinkNodes(t *testing.T) {
 	t.Run("appends one undirected unlink event", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
 
@@ -190,7 +193,7 @@ func TestSynapse_UnlinkNodes(t *testing.T) {
 		assert.Equal(t, links.StreamTypeLink, e.StreamType)
 		assert.Equal(t, links.EventTypeLinkRemoved, e.EventType)
 		assert.Equal(t, int64(2), e.StreamVersion)
-		assert.Equal(t, links.StreamIDForPair(events.StreamID(fromID.String()), events.StreamID(toID.String())), e.StreamID)
+		assert.Equal(t, links.StreamIDForPair(fromID.StreamID(), toID.StreamID()), e.StreamID)
 		assert.GreaterOrEqual(t, e.OccurredAt, before)
 		assert.LessOrEqual(t, e.OccurredAt, after)
 
@@ -201,7 +204,7 @@ func TestSynapse_UnlinkNodes(t *testing.T) {
 	})
 
 	t.Run("fails when link does not exist", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 
 		err := svc.UnlinkNodes(context.Background(), fromID, toID)
@@ -215,7 +218,7 @@ func TestSynapse_UnlinkNodes(t *testing.T) {
 
 func TestSynapse_RunProjections(t *testing.T) {
 	t.Run("catches up all projections and persists iterators", func(t *testing.T) {
-		svc, eventsRepo, db := newTestService(t)
+		svc, eventsRepo, db := newTestService(t, nil)
 		schemasRepo := schemas.NewProjectionRepository()
 		nodesRepo := nodes.NewProjectionRepository()
 		linksRepo := links.NewProjectionRepository()
@@ -231,11 +234,11 @@ func TestSynapse_RunProjections(t *testing.T) {
 		require.Len(t, storedSchemas, 1)
 		assert.Equal(t, schemaID.String(), storedSchemas[0].ID.String())
 
-		storedNodes, err := nodesRepo.GetNodesBySchemaID(context.Background(), db, schemaID, 10)
+		storedNodes, err := nodesRepo.GetNodesBySchemaID(context.Background(), db, schemaID.StreamID(), 10)
 		require.NoError(t, err)
 		require.Len(t, storedNodes, 2)
 
-		storedLinks, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{events.StreamID(fromID.String()), events.StreamID(toID.String())}, 10)
+		storedLinks, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{fromID.StreamID(), toID.StreamID()}, 10)
 		require.NoError(t, err)
 		require.Empty(t, storedLinks)
 
@@ -251,13 +254,13 @@ func TestSynapse_RunProjections(t *testing.T) {
 
 		require.NoError(t, svc.RunProjections(context.Background()))
 
-		storedLinksAgain, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{events.StreamID(fromID.String())}, 10)
+		storedLinksAgain, err := linksRepo.GetLinksFrom(context.Background(), db, []events.StreamID{fromID.StreamID()}, 10)
 		require.NoError(t, err)
 		require.Empty(t, storedLinksAgain)
 	})
 }
 
-func TestSynapse_RunReplicators(t *testing.T) {
+func TestSynapse_RunReplication(t *testing.T) {
 	t.Run("catches up all events into a single jsonl file and persists iterators", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "replica.jsonl")
 		rep := replicators.NewFile("events_jsonl", path)
@@ -265,7 +268,7 @@ func TestSynapse_RunReplicators(t *testing.T) {
 		schemaID, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
 		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
 
-		require.NoError(t, svc.RunReplicators(context.Background()))
+		require.NoError(t, svc.RunReplication(context.Background()))
 
 		iterator, err := eventsRepo.GetReplicatorIterator(context.Background(), db, rep.Name())
 		require.NoError(t, err)
@@ -282,7 +285,7 @@ func TestSynapse_RunReplicators(t *testing.T) {
 			assert.Equal(t, int64(i+1), event.GlobalPosition)
 		}
 
-		require.NoError(t, svc.RunReplicators(context.Background()))
+		require.NoError(t, svc.RunReplication(context.Background()))
 
 		data, err = os.ReadFile(path)
 		require.NoError(t, err)
@@ -293,17 +296,17 @@ func TestSynapse_RunReplicators(t *testing.T) {
 }
 
 func TestSynapse_Restore(t *testing.T) {
-	t.Run("restores events from named replicator into an empty database", func(t *testing.T) {
+	t.Run("restores events from replicator into an empty database", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "replica.jsonl")
 		rep := replicators.NewFile("events_jsonl", path)
 		sourceSvc, sourceEventsRepo, sourceDB := newTestService(t, rep)
 		schemaID, fromID, toID := seedTwoNodes(t, sourceSvc, sourceEventsRepo, sourceDB)
 		require.NoError(t, sourceSvc.LinkNodes(context.Background(), fromID, toID))
-		require.NoError(t, sourceSvc.RunReplicators(context.Background()))
+		require.NoError(t, sourceSvc.RunReplication(context.Background()))
 
 		targetRep := replicators.NewFile("events_jsonl", path)
 		targetSvc, targetEventsRepo, targetDB := newTestService(t, targetRep)
-		require.NoError(t, targetSvc.Restore(context.Background(), "events_jsonl"))
+		require.NoError(t, targetSvc.Restore(context.Background()))
 
 		sourceEvents, err := sourceEventsRepo.GetStreamEvents(context.Background(), sourceDB, "", 0, 100)
 		require.NoError(t, err)
@@ -314,7 +317,7 @@ func TestSynapse_Restore(t *testing.T) {
 
 		require.NoError(t, targetSvc.RunProjections(context.Background()))
 		nodesRepo := nodes.NewProjectionRepository()
-		storedNodes, err := nodesRepo.GetNodesBySchemaID(context.Background(), targetDB, schemaID, 10)
+		storedNodes, err := nodesRepo.GetNodesBySchemaID(context.Background(), targetDB, schemaID.StreamID(), 10)
 		require.NoError(t, err)
 		require.Len(t, storedNodes, 2)
 	})
@@ -325,19 +328,19 @@ func TestSynapse_Restore(t *testing.T) {
 		sourceSvc, sourceEventsRepo, sourceDB := newTestService(t, rep)
 		_, fromID, toID := seedTwoNodes(t, sourceSvc, sourceEventsRepo, sourceDB)
 		require.NoError(t, sourceSvc.LinkNodes(context.Background(), fromID, toID))
-		require.NoError(t, sourceSvc.RunReplicators(context.Background()))
+		require.NoError(t, sourceSvc.RunReplication(context.Background()))
 
 		targetSvc, _, _ := newTestService(t, replicators.NewFile("events_jsonl", path))
-		require.NoError(t, targetSvc.AddSchema(context.Background(), "person", `{"type":"object"}`))
+		require.NoError(t, targetSvc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
 
-		err := targetSvc.Restore(context.Background(), "events_jsonl")
+		err := targetSvc.Restore(context.Background())
 		require.ErrorContains(t, err, "event store must be empty")
 	})
 
-	t.Run("fails when replicator is not found", func(t *testing.T) {
-		svc, _, _ := newTestService(t)
-		err := svc.Restore(context.Background(), "missing")
-		require.ErrorContains(t, err, `replicator "missing" not found`)
+	t.Run("fails when no replicator configured", func(t *testing.T) {
+		svc, _, _ := newTestService(t, nil)
+		err := svc.Restore(context.Background())
+		require.ErrorContains(t, err, "no replicator configured")
 	})
 }
 
@@ -349,17 +352,18 @@ func mustReadReplicatedEvent(t *testing.T, line string) events.Event {
 	return event
 }
 
-func seedTwoNodes(t *testing.T, svc *Synapse, eventsRepo *events.Repository, db *sql.DB) (schemaID events.StreamID, fromID, toID nodes.ID) {
+func seedTwoNodes(t *testing.T, svc *Synapse, eventsRepo *events.Repository, db *sql.DB) (schemaID schemas.ID, fromID, toID nodes.ID) {
 	t.Helper()
 
-	require.NoError(t, svc.AddSchema(context.Background(), "person", `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+	require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
 	seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 	require.NoError(t, err)
 	require.Len(t, seedEvents, 1)
-	schemaID = seedEvents[0].StreamID
+	schemaID, err = schemas.ParseID(seedEvents[0].StreamID.String())
+	require.NoError(t, err)
 
-	require.NoError(t, svc.AddNode(context.Background(), schemaID, `{"name":"Ada"}`))
-	require.NoError(t, svc.AddNode(context.Background(), schemaID, `{"name":"Grace"}`))
+	require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+	require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace"}`)))
 
 	seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 	require.NoError(t, err)

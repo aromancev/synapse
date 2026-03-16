@@ -17,8 +17,8 @@ import (
 )
 
 type Synapse struct {
-	db          *sql.DB
-	replicators []replicators.Replicator
+	db         *sql.DB
+	replicator replicators.Replicator
 }
 
 type projection interface {
@@ -27,17 +27,17 @@ type projection interface {
 	Project(ctx context.Context, db sqlx.DB, event events.Event) error
 }
 
-func NewSynapse(db *sql.DB, replicators ...replicators.Replicator) *Synapse {
-	return &Synapse{db: db, replicators: replicators}
+func NewSynapse(db *sql.DB, replicator replicators.Replicator) *Synapse {
+	return &Synapse{db: db, replicator: replicator}
 }
 
-func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error {
+func (s *Synapse) AddSchema(ctx context.Context, name string, schemaJSON json.RawMessage) error {
 	schemaID, err := schemas.NewID()
 	if err != nil {
 		return fmt.Errorf("new schema id: %w", err)
 	}
 
-	schema := schemas.Schema{ID: schemaID, Name: name, Schema: json.RawMessage(schemaJSON)}.Normalized()
+	schema := schemas.Schema{ID: schemaID, Name: name, Schema: schemaJSON}.Normalized()
 	if validationErrors := schema.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -49,8 +49,7 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	defer tx.Rollback()
 
 	eventsRepo := events.NewRepository()
-	streamID := events.StreamID(schema.ID.String())
-	stream, err := loadStream(ctx, eventsRepo, tx, streamID, schemas.StreamTypeSchema)
+	stream, err := loadStream(ctx, eventsRepo, tx, schema.ID.StreamID(), schemas.StreamTypeSchema)
 	if err != nil {
 		return fmt.Errorf("load schema stream: %w", err)
 	}
@@ -75,13 +74,13 @@ func (s *Synapse) AddSchema(ctx context.Context, name, schemaJSON string) error 
 	return nil
 }
 
-func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payloadJSON string) error {
+func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON json.RawMessage) error {
 	nodeID, err := nodes.NewID()
 	if err != nil {
 		return fmt.Errorf("new node id: %w", err)
 	}
 
-	node := nodes.Node{ID: nodeID, SchemaID: schemaID, CreatedAt: nowUnix(), Payload: json.RawMessage(payloadJSON)}.Normalized()
+	node := nodes.Node{ID: nodeID, SchemaID: schemaID.StreamID(), CreatedAt: nowUnix(), Payload: payloadJSON}.Normalized()
 	if validationErrors := node.Validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
@@ -94,20 +93,15 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID events.StreamID, payload
 
 	eventsRepo := events.NewRepository()
 
-	schemaStream, err := loadStream(ctx, eventsRepo, tx, schemaID, schemas.StreamTypeSchema)
+	schemaAggregate, err := loadSchemaAggregate(ctx, eventsRepo, tx, schemaID)
 	if err != nil {
-		return fmt.Errorf("load schema stream: %w", err)
-	}
-	schemaAggregate := &schemas.Aggregate{}
-	if err := replayAggregate(ctx, schemaAggregate, schemaStream); err != nil {
-		return fmt.Errorf("replay schema aggregate: %w", err)
+		return err
 	}
 	if err := schemaAggregate.Validate(ctx, node.Payload); err != nil {
 		return fmt.Errorf("validate node payload against schema: %w", err)
 	}
 
-	streamID := events.StreamID(node.ID.String())
-	stream, err := loadStream(ctx, eventsRepo, tx, streamID, nodes.StreamTypeNode)
+	stream, err := loadStream(ctx, eventsRepo, tx, node.ID.StreamID(), nodes.StreamTypeNode)
 	if err != nil {
 		return fmt.Errorf("load node stream: %w", err)
 	}
@@ -212,20 +206,14 @@ func (s *Synapse) RunProjection(ctx context.Context, p projection) error {
 	}
 }
 
-func (s *Synapse) RunReplicators(ctx context.Context) error {
-	for _, r := range s.replicators {
-		if err := s.RunReplicator(ctx, r); err != nil {
-			return fmt.Errorf("run replicator %s: %w", r.Name(), err)
-		}
+func (s *Synapse) RunReplication(ctx context.Context) error {
+	if s.replicator == nil {
+		return nil
 	}
 
-	return nil
-}
-
-func (s *Synapse) RunReplicator(ctx context.Context, r replicators.Replicator) error {
 	eventsRepo := events.NewRepository()
 	for {
-		lastPosition, err := eventsRepo.GetReplicatorIterator(ctx, s.db, r.Name())
+		lastPosition, err := eventsRepo.GetReplicatorIterator(ctx, s.db, s.replicator.Name())
 		if err != nil {
 			return fmt.Errorf("get iterator: %w", err)
 		}
@@ -247,18 +235,18 @@ func (s *Synapse) RunReplicator(ctx context.Context, r replicators.Replicator) e
 		}
 
 		for _, e := range batch {
-			if err := r.Replicate(ctx, e); err != nil {
+			if err := s.replicator.Replicate(ctx, e); err != nil {
 				return fmt.Errorf("replicate event at global position %d: %w", e.GlobalPosition, err)
 			}
 
-			if err := eventsRepo.AdvanceReplicatorIterator(ctx, s.db, r.Name(), e.GlobalPosition, nowUnix()); err != nil {
+			if err := eventsRepo.AdvanceReplicatorIterator(ctx, s.db, s.replicator.Name(), e.GlobalPosition, nowUnix()); err != nil {
 				return fmt.Errorf("advance iterator: %w", err)
 			}
 		}
 	}
 }
 
-func (s *Synapse) Restore(ctx context.Context, replicatorName string) error {
+func (s *Synapse) Restore(ctx context.Context) error {
 	eventsRepo := events.NewRepository()
 	headPosition, err := eventsRepo.GetHeadGlobalPosition(ctx, s.db)
 	if err != nil {
@@ -268,9 +256,8 @@ func (s *Synapse) Restore(ctx context.Context, replicatorName string) error {
 		return errors.New("event store must be empty before restore")
 	}
 
-	replicator, ok := s.replicatorByName(replicatorName)
-	if !ok {
-		return fmt.Errorf("replicator %q not found", replicatorName)
+	if s.replicator == nil {
+		return errors.New("no replicator configured")
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -279,8 +266,8 @@ func (s *Synapse) Restore(ctx context.Context, replicatorName string) error {
 	}
 	defer tx.Rollback()
 
-	if err := replicator.Restore(ctx, eventsRepo, tx); err != nil {
-		return fmt.Errorf("restore from replicator %s: %w", replicator.Name(), err)
+	if err := s.replicator.Restore(ctx, eventsRepo, tx); err != nil {
+		return fmt.Errorf("restore from replicator %s: %w", s.replicator.Name(), err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -288,6 +275,33 @@ func (s *Synapse) Restore(ctx context.Context, replicatorName string) error {
 	}
 
 	return nil
+}
+
+func loadSchemaAggregate(ctx context.Context, repo *events.Repository, db sqlx.DB, id schemas.ID) (*schemas.Aggregate, error) {
+	stream, err := loadStream(ctx, repo, db, id.StreamID(), schemas.StreamTypeSchema)
+	if err != nil {
+		return nil, fmt.Errorf("load schema stream: %w", err)
+	}
+	aggregate := &schemas.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return nil, fmt.Errorf("replay schema aggregate: %w", err)
+	}
+	return aggregate, nil
+}
+
+func loadExistingNodeAggregate(ctx context.Context, repo *events.Repository, db sqlx.DB, id nodes.ID) (*nodes.Aggregate, error) {
+	stream, err := loadStream(ctx, repo, db, id.StreamID(), nodes.StreamTypeNode)
+	if err != nil {
+		return nil, fmt.Errorf("load node stream: %w", err)
+	}
+	aggregate := &nodes.Aggregate{}
+	if err := replayAggregate(ctx, aggregate, stream); err != nil {
+		return nil, fmt.Errorf("replay node aggregate: %w", err)
+	}
+	if !aggregate.Exists() {
+		return nil, fmt.Errorf("node does not exist: %s", id)
+	}
+	return aggregate, nil
 }
 
 func loadStream(ctx context.Context, repo *events.Repository, db sqlx.DB, streamID events.StreamID, streamType events.StreamType) (*events.Stream, error) {
@@ -317,19 +331,6 @@ func appendRecordedEvents(ctx context.Context, repo *events.Repository, db sqlx.
 	return nil
 }
 
-func replicatorByName(replicators []replicators.Replicator, name string) (replicators.Replicator, bool) {
-	for _, replicator := range replicators {
-		if replicator.Name() == name {
-			return replicator, true
-		}
-	}
-	return nil, false
-}
-
-func (s *Synapse) replicatorByName(name string) (replicators.Replicator, bool) {
-	return replicatorByName(s.replicators, name)
-}
-
 func nowUnix() int64 {
 	return time.Now().Unix()
 }
@@ -344,8 +345,8 @@ func normalizeLinkPair(from, to events.StreamID) (events.StreamID, events.Stream
 }
 
 func (s *Synapse) mutateLink(ctx context.Context, fromID, toID nodes.ID, mutate func(aggregate *links.Aggregate, stream *events.Stream, fromStreamID, toStreamID events.StreamID) error) error {
-	fromStreamID := events.StreamID(fromID.String())
-	toStreamID := events.StreamID(toID.String())
+	fromStreamID := fromID.StreamID()
+	toStreamID := toID.StreamID()
 	fromStreamID, toStreamID = normalizeLinkPair(fromStreamID, toStreamID)
 	if err := fromStreamID.Validate(); err != nil {
 		return fmt.Errorf("from: %w", err)
@@ -365,28 +366,12 @@ func (s *Synapse) mutateLink(ctx context.Context, fromID, toID nodes.ID, mutate 
 
 	eventsRepo := events.NewRepository()
 
-	fromStream, err := loadStream(ctx, eventsRepo, tx, fromStreamID, nodes.StreamTypeNode)
-	if err != nil {
-		return fmt.Errorf("load from node stream: %w", err)
-	}
-	fromAggregate := &nodes.Aggregate{}
-	if err := replayAggregate(ctx, fromAggregate, fromStream); err != nil {
-		return fmt.Errorf("replay from node aggregate: %w", err)
-	}
-	if !fromAggregate.Exists() {
-		return fmt.Errorf("from node does not exist: %s", fromID)
+	if _, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, fromID); err != nil {
+		return fmt.Errorf("from: %w", err)
 	}
 
-	toStream, err := loadStream(ctx, eventsRepo, tx, toStreamID, nodes.StreamTypeNode)
-	if err != nil {
-		return fmt.Errorf("load to node stream: %w", err)
-	}
-	toAggregate := &nodes.Aggregate{}
-	if err := replayAggregate(ctx, toAggregate, toStream); err != nil {
-		return fmt.Errorf("replay to node aggregate: %w", err)
-	}
-	if !toAggregate.Exists() {
-		return fmt.Errorf("to node does not exist: %s", toID)
+	if _, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, toID); err != nil {
+		return fmt.Errorf("to: %w", err)
 	}
 
 	streamID := links.StreamIDForPair(fromStreamID, toStreamID)

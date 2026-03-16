@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/oklog/ulid/v2"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -30,6 +31,10 @@ func NewID() (ID, error) {
 
 func (id ID) String() string {
 	return idPrefix + ulid.ULID(id).String()
+}
+
+func (id ID) StreamID() events.StreamID {
+	return events.StreamID(id.String())
 }
 
 func ParseID(s string) (ID, error) {

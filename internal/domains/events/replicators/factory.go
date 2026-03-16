@@ -7,18 +7,19 @@ import (
 )
 
 func NewFromConfig(cfg config.Config) ([]Replicator, error) {
-	out := make([]Replicator, 0, len(cfg.Replicators))
-	for _, replicator := range cfg.Replicators {
-		switch replicator.Type {
-		case config.ReplicatorTypeFile:
-			fileCfg, err := replicator.FileConfig()
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, NewFile(replicator.Name, fileCfg.Path))
-		default:
-			return nil, fmt.Errorf("unsupported replicator type %q", replicator.Type)
-		}
+	if cfg.Replication.Replicator == nil {
+		return nil, nil
 	}
-	return out, nil
+
+	replicator := *cfg.Replication.Replicator
+	switch replicator.Type {
+	case config.ReplicatorTypeFile:
+		fileCfg, err := replicator.FileConfig()
+		if err != nil {
+			return nil, err
+		}
+		return []Replicator{NewFile(replicator.Name, fileCfg.Path)}, nil
+	default:
+		return nil, fmt.Errorf("unsupported replicator type %q", replicator.Type)
+	}
 }

@@ -31,6 +31,10 @@ func (id ID) String() string {
 	return idPrefix + ulid.ULID(id).String()
 }
 
+func (id ID) StreamID() events.StreamID {
+	return events.StreamID(id.String())
+}
+
 func ParseID(s string) (ID, error) {
 	if strings.TrimSpace(s) == "" {
 		return ID{}, errors.New("id is required")
