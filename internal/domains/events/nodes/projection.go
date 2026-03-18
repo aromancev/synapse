@@ -36,7 +36,7 @@ func (p *Projection) StreamType() events.StreamType {
 func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event) error {
 	switch event.EventType {
 	case EventTypeNodeCreated:
-		var payload createdEvent
+		var payload nodeCreatedEvent
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			return fmt.Errorf("unmarshal node.created payload: %w", err)
 		}
@@ -48,6 +48,23 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 			CreatedAt: event.OccurredAt,
 			Payload:   payload.Payload,
 		})
+	case EventTypeNodeUpdated:
+		var payload nodeUpdatedEvent
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("unmarshal node.updated payload: %w", err)
+		}
+
+		nodeID, err := ParseID(event.StreamID.String())
+		if err != nil {
+			return fmt.Errorf("parse node id from stream id: %w", err)
+		}
+		current, err := p.repo.GetNodeByID(ctx, db, nodeID)
+		if err != nil {
+			return fmt.Errorf("get existing node: %w", err)
+		}
+
+		current.Payload = payload.Payload
+		return p.repo.UpsertNode(ctx, db, current)
 	default:
 		return nil
 	}
