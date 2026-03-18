@@ -12,22 +12,43 @@ import (
 const (
 	StreamTypeNode       events.StreamType = "node"
 	EventTypeNodeCreated events.EventType  = "node.created"
+	EventTypeNodeUpdated events.EventType  = "node.updated"
 )
 
-type createdEvent struct {
+type nodeCreatedEvent struct {
 	ID       ID              `json:"id"`
 	SchemaID events.StreamID `json:"schema_id"`
 	Payload  json.RawMessage `json:"payload"`
 }
 
-func (e createdEvent) normalized() createdEvent {
+func (e nodeCreatedEvent) normalized() nodeCreatedEvent {
 	node := Node{ID: e.ID, SchemaID: e.SchemaID, Payload: e.Payload}.Normalized()
-	return createdEvent{ID: node.ID, SchemaID: node.SchemaID, Payload: node.Payload}
+	return nodeCreatedEvent{ID: node.ID, SchemaID: node.SchemaID, Payload: node.Payload}
 }
 
-func (e createdEvent) validate() []error {
+func (e nodeCreatedEvent) validate() []error {
 	node := Node{ID: e.ID, SchemaID: e.SchemaID, CreatedAt: time.Now().Unix(), Payload: e.Payload}
 	return node.Validate()
+}
+
+type nodeUpdatedEvent struct {
+	Payload json.RawMessage `json:"payload"`
+}
+
+func (e nodeUpdatedEvent) validate() []error {
+	var errs []error
+	if len(e.Payload) == 0 {
+		errs = append(errs, errors.New("payload is required"))
+	} else {
+		if len(e.Payload) > 256*1024 {
+			errs = append(errs, errors.New("payload must not exceed 256KB"))
+		}
+		var doc any
+		if err := json.Unmarshal(e.Payload, &doc); err != nil {
+			errs = append(errs, errors.New("payload must be valid JSON"))
+		}
+	}
+	return errs
 }
 
 // Aggregate is an event-sourced aggregate for nodes.
@@ -44,17 +65,20 @@ func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
 	switch event.EventType {
 	case EventTypeNodeCreated:
 		return a.applyCreated(event)
+	case EventTypeNodeUpdated:
+		return a.applyUpdated(event)
 	default:
 		return nil
 	}
 }
 
 func (a *Aggregate) applyCreated(event events.Event) error {
-	var payload createdEvent
+	var payload nodeCreatedEvent
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return err
 	}
 	payload = payload.normalized()
+
 	a.exists = true
 	a.id = payload.ID
 	a.schemaID = payload.SchemaID
@@ -62,18 +86,50 @@ func (a *Aggregate) applyCreated(event events.Event) error {
 	return nil
 }
 
+func (a *Aggregate) applyUpdated(event events.Event) error {
+	var payload nodeUpdatedEvent
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return err
+	}
+
+	a.payload = payload.Payload
+	return nil
+}
+
 func (a *Aggregate) Exists() bool { return a.exists }
+
+func (a *Aggregate) SchemaID() events.StreamID { return a.schemaID }
+
+func (a *Aggregate) Payload() json.RawMessage {
+	return a.payload
+}
 
 func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, payload json.RawMessage, id ID, schemaID events.StreamID) error {
 	_ = ctx
 
-	eventPayload := createdEvent{ID: id, SchemaID: schemaID, Payload: payload}.normalized()
+	eventPayload := nodeCreatedEvent{ID: id, SchemaID: schemaID, Payload: payload}.normalized()
 	if validationErrors := eventPayload.validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
 	}
 
 	return stream.Record(events.Request{
 		EventType:    EventTypeNodeCreated,
+		EventVersion: 1,
+		OccurredAt:   time.Now().Unix(),
+		Payload:      eventPayload,
+	})
+}
+
+func (a *Aggregate) Update(ctx context.Context, stream *events.Stream, payload json.RawMessage) error {
+	_ = ctx
+
+	eventPayload := nodeUpdatedEvent{Payload: payload}
+	if validationErrors := eventPayload.validate(); len(validationErrors) > 0 {
+		return errors.Join(validationErrors...)
+	}
+
+	return stream.Record(events.Request{
+		EventType:    EventTypeNodeUpdated,
 		EventVersion: 1,
 		OccurredAt:   time.Now().Unix(),
 		Payload:      eventPayload,

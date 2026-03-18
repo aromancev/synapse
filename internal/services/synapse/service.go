@@ -125,6 +125,50 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON 
 	return nil
 }
 
+func (s *Synapse) UpdateNode(ctx context.Context, nodeID nodes.ID, payloadJSON json.RawMessage) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository()
+	aggregate, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	schemaID, err := schemas.ParseID(aggregate.SchemaID().String())
+	if err != nil {
+		return fmt.Errorf("parse schema id: %w", err)
+	}
+	schemaAggregate, err := loadSchemaAggregate(ctx, eventsRepo, tx, schemaID)
+	if err != nil {
+		return err
+	}
+	if err := schemaAggregate.Validate(ctx, payloadJSON); err != nil {
+		return fmt.Errorf("validate node payload against schema: %w", err)
+	}
+
+	stream, err := loadStream(ctx, eventsRepo, tx, nodeID.StreamID(), nodes.StreamTypeNode)
+	if err != nil {
+		return fmt.Errorf("load node stream: %w", err)
+	}
+	if err := aggregate.Update(ctx, stream, payloadJSON); err != nil {
+		return fmt.Errorf("aggregate update node: %w", err)
+	}
+
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append node events: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Synapse) LinkNodes(ctx context.Context, fromID, toID nodes.ID) error {
 	return s.mutateLink(ctx, fromID, toID, func(aggregate *links.Aggregate, stream *events.Stream, fromStreamID, toStreamID events.StreamID) error {
 		if err := aggregate.Create(ctx, stream, fromStreamID, toStreamID); err != nil {

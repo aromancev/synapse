@@ -118,6 +118,77 @@ func TestSynapse_AddNode(t *testing.T) {
 	})
 }
 
+func TestSynapse_UpdateNode(t *testing.T) {
+	t.Run("appends node updated event and projections replace payload", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"active":{"type":"boolean"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		before := time.Now().Unix()
+		err = svc.UpdateNode(context.Background(), nodeID, json.RawMessage(`{"name":"Grace","active":true}`))
+		after := time.Now().Unix()
+		require.NoError(t, err)
+
+		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, eventsInStream, 3)
+
+		e := eventsInStream[2]
+		assert.Equal(t, nodeID.StreamID(), e.StreamID)
+		assert.Equal(t, nodes.StreamTypeNode, e.StreamType)
+		assert.Equal(t, nodes.EventTypeNodeUpdated, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+		assert.GreaterOrEqual(t, e.OccurredAt, before)
+		assert.LessOrEqual(t, e.OccurredAt, after)
+
+		var payload map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(e.Payload, &payload))
+		assert.JSONEq(t, `{"name":"Grace","active":true}`, string(payload["payload"]))
+
+		require.NoError(t, svc.RunProjection(context.Background(), nodes.NewProjection()))
+		stored, err := nodes.NewProjectionRepository().GetNodeByID(context.Background(), db, nodeID)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"name":"Grace","active":true}`, string(stored.Payload))
+	})
+
+	t.Run("fails when updated payload does not match schema", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		err = svc.UpdateNode(context.Background(), nodeID, json.RawMessage(`42`))
+		require.Error(t, err)
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 2)
+	})
+}
+
 func TestSynapse_LinkNodes(t *testing.T) {
 	t.Run("appends one undirected link event", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
