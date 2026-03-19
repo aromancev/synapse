@@ -137,6 +137,10 @@ func (s *Synapse) UpdateNode(ctx context.Context, nodeID nodes.ID, payloadJSON j
 	if err != nil {
 		return err
 	}
+	stream, err := loadStream(ctx, eventsRepo, tx, nodeID.StreamID(), nodes.StreamTypeNode)
+	if err != nil {
+		return fmt.Errorf("load node stream: %w", err)
+	}
 
 	schemaID, err := schemas.ParseID(aggregate.SchemaID().String())
 	if err != nil {
@@ -150,12 +154,40 @@ func (s *Synapse) UpdateNode(ctx context.Context, nodeID nodes.ID, payloadJSON j
 		return fmt.Errorf("validate node payload against schema: %w", err)
 	}
 
+	if err := aggregate.Update(ctx, stream, payloadJSON); err != nil {
+		return fmt.Errorf("aggregate update node: %w", err)
+	}
+
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append node events: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Synapse) ArchiveNode(ctx context.Context, nodeID nodes.ID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository()
+	aggregate, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, nodeID)
+	if err != nil {
+		return err
+	}
 	stream, err := loadStream(ctx, eventsRepo, tx, nodeID.StreamID(), nodes.StreamTypeNode)
 	if err != nil {
 		return fmt.Errorf("load node stream: %w", err)
 	}
-	if err := aggregate.Update(ctx, stream, payloadJSON); err != nil {
-		return fmt.Errorf("aggregate update node: %w", err)
+
+	if err := aggregate.Archive(ctx, stream); err != nil {
+		return fmt.Errorf("aggregate archive node: %w", err)
 	}
 
 	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
@@ -410,12 +442,20 @@ func (s *Synapse) mutateLink(ctx context.Context, fromID, toID nodes.ID, mutate 
 
 	eventsRepo := events.NewRepository()
 
-	if _, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, fromID); err != nil {
+	fromAggregate, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, fromID)
+	if err != nil {
 		return fmt.Errorf("from: %w", err)
 	}
+	if fromAggregate.Archived() {
+		return errors.New("from node is archived")
+	}
 
-	if _, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, toID); err != nil {
+	toAggregate, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, toID)
+	if err != nil {
 		return fmt.Errorf("to: %w", err)
+	}
+	if toAggregate.Archived() {
+		return errors.New("to node is archived")
 	}
 
 	streamID := links.StreamIDForPair(fromStreamID, toStreamID)
