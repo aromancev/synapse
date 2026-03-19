@@ -187,6 +187,113 @@ func TestSynapse_UpdateNode(t *testing.T) {
 		require.NoError(t, streamErr)
 		assert.Len(t, eventsInStream, 2)
 	})
+
+	t.Run("fails when node is archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.ArchiveNode(context.Background(), nodeID))
+		err = svc.UpdateNode(context.Background(), nodeID, json.RawMessage(`{"name":"Grace"}`))
+		require.ErrorContains(t, err, "node is archived")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 3)
+	})
+}
+
+func TestSynapse_ArchiveNode(t *testing.T) {
+	t.Run("appends node archived event and projections mark stored node as archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.RunProjection(context.Background(), nodes.NewProjection()))
+		_, err = nodes.NewProjectionRepository().GetNodeByID(context.Background(), db, nodeID)
+		require.NoError(t, err)
+
+		before := time.Now().Unix()
+		err = svc.ArchiveNode(context.Background(), nodeID)
+		after := time.Now().Unix()
+		require.NoError(t, err)
+
+		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, eventsInStream, 3)
+
+		e := eventsInStream[2]
+		assert.Equal(t, nodeID.StreamID(), e.StreamID)
+		assert.Equal(t, nodes.StreamTypeNode, e.StreamType)
+		assert.Equal(t, nodes.EventTypeNodeArchived, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+		assert.GreaterOrEqual(t, e.OccurredAt, before)
+		assert.LessOrEqual(t, e.OccurredAt, after)
+
+		require.NoError(t, svc.RunProjection(context.Background(), nodes.NewProjection()))
+		stored, err := nodes.NewProjectionRepository().GetNodeByID(context.Background(), db, nodeID)
+		require.NoError(t, err)
+		assert.Positive(t, stored.ArchivedAt)
+
+		activeNodes, err := nodes.NewProjectionRepository().GetNodesBySchemaID(context.Background(), db, schemaID.StreamID(), 10)
+		require.NoError(t, err)
+		assert.Empty(t, activeNodes)
+
+		archivedNodes, err := nodes.NewProjectionRepository().GetArchivedNodesBySchemaID(context.Background(), db, schemaID.StreamID(), 10)
+		require.NoError(t, err)
+		require.Len(t, archivedNodes, 1)
+		assert.Equal(t, nodeID, archivedNodes[0].ID)
+	})
+
+	t.Run("fails when node does not exist", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		missing, err := nodes.ParseID("node_01ARZ3NDEKTSV4RRFFQ69G5FAX")
+		require.NoError(t, err)
+
+		err = svc.ArchiveNode(context.Background(), missing)
+		require.ErrorContains(t, err, "node does not exist")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 0)
+	})
+
+	t.Run("fails when node is already archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		_, nodeID, _ := seedTwoNodes(t, svc, eventsRepo, db)
+
+		require.NoError(t, svc.ArchiveNode(context.Background(), nodeID))
+		err := svc.ArchiveNode(context.Background(), nodeID)
+		require.ErrorContains(t, err, "node is already archived")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 4)
+	})
 }
 
 func TestSynapse_LinkNodes(t *testing.T) {
@@ -238,6 +345,32 @@ func TestSynapse_LinkNodes(t *testing.T) {
 		require.NoError(t, svc.LinkNodes(context.Background(), fromID, toID))
 		err := svc.LinkNodes(context.Background(), toID, fromID)
 		require.ErrorContains(t, err, "link already exists")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 4)
+	})
+
+	t.Run("fails when from node is archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
+		require.NoError(t, svc.ArchiveNode(context.Background(), fromID))
+
+		err := svc.LinkNodes(context.Background(), fromID, toID)
+		require.ErrorContains(t, err, "from node is archived")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 4)
+	})
+
+	t.Run("fails when to node is archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		_, fromID, toID := seedTwoNodes(t, svc, eventsRepo, db)
+		require.NoError(t, svc.ArchiveNode(context.Background(), toID))
+
+		err := svc.LinkNodes(context.Background(), fromID, toID)
+		require.ErrorContains(t, err, "to node is archived")
 
 		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, streamErr)

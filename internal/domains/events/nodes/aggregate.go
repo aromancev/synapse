@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	StreamTypeNode       events.StreamType = "node"
-	EventTypeNodeCreated events.EventType  = "node.created"
-	EventTypeNodeUpdated events.EventType  = "node.updated"
+	StreamTypeNode        events.StreamType = "node"
+	EventTypeNodeCreated  events.EventType  = "node.created"
+	EventTypeNodeUpdated  events.EventType  = "node.updated"
+	EventTypeNodeArchived events.EventType  = "node.archived"
 )
 
 type nodeCreatedEvent struct {
@@ -53,10 +54,11 @@ func (e nodeUpdatedEvent) validate() []error {
 
 // Aggregate is an event-sourced aggregate for nodes.
 type Aggregate struct {
-	exists   bool
-	id       ID
-	schemaID events.StreamID
-	payload  json.RawMessage
+	exists     bool
+	archivedAt int64
+	id         ID
+	schemaID   events.StreamID
+	payload    json.RawMessage
 }
 
 func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
@@ -67,6 +69,8 @@ func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
 		return a.applyCreated(event)
 	case EventTypeNodeUpdated:
 		return a.applyUpdated(event)
+	case EventTypeNodeArchived:
+		return a.applyArchived(event)
 	default:
 		return nil
 	}
@@ -96,7 +100,16 @@ func (a *Aggregate) applyUpdated(event events.Event) error {
 	return nil
 }
 
+func (a *Aggregate) applyArchived(event events.Event) error {
+	a.archivedAt = event.OccurredAt
+	return nil
+}
+
 func (a *Aggregate) Exists() bool { return a.exists }
+
+func (a *Aggregate) Archived() bool { return a.archivedAt > 0 }
+
+func (a *Aggregate) ArchivedAt() int64 { return a.archivedAt }
 
 func (a *Aggregate) SchemaID() events.StreamID { return a.schemaID }
 
@@ -123,6 +136,10 @@ func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, payload j
 func (a *Aggregate) Update(ctx context.Context, stream *events.Stream, payload json.RawMessage) error {
 	_ = ctx
 
+	if a.Archived() {
+		return errors.New("node is archived")
+	}
+
 	eventPayload := nodeUpdatedEvent{Payload: payload}
 	if validationErrors := eventPayload.validate(); len(validationErrors) > 0 {
 		return errors.Join(validationErrors...)
@@ -133,5 +150,23 @@ func (a *Aggregate) Update(ctx context.Context, stream *events.Stream, payload j
 		EventVersion: 1,
 		OccurredAt:   time.Now().Unix(),
 		Payload:      eventPayload,
+	})
+}
+
+func (a *Aggregate) Archive(ctx context.Context, stream *events.Stream) error {
+	_ = ctx
+
+	if !a.Exists() {
+		return errors.New("node does not exist")
+	}
+	if a.Archived() {
+		return errors.New("node is already archived")
+	}
+
+	return stream.Record(events.Request{
+		EventType:    EventTypeNodeArchived,
+		EventVersion: 1,
+		OccurredAt:   time.Now().Unix(),
+		Payload:      struct{}{},
 	})
 }

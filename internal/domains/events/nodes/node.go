@@ -83,10 +83,11 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 
 // Node is a stored payload bound to a schema stream.
 type Node struct {
-	ID        ID              `json:"id"`
-	SchemaID  events.StreamID `json:"schema_id"`
-	CreatedAt int64           `json:"created_at"`
-	Payload   json.RawMessage `json:"payload"`
+	ID         ID              `json:"id"`
+	SchemaID   events.StreamID `json:"schema_id"`
+	CreatedAt  int64           `json:"created_at"`
+	ArchivedAt int64           `json:"archived_at"`
+	Payload    json.RawMessage `json:"payload"`
 }
 
 // Normalized returns a normalized copy of the node.
@@ -119,6 +120,17 @@ func (n Node) Validate() []error {
 		errs = append(errs, errors.New("created_at is required"))
 	} else if n.CreatedAt > time.Now().Add(24*time.Hour).Unix() {
 		errs = append(errs, errors.New("created_at cannot be in the far future"))
+	}
+
+	if n.ArchivedAt < 0 {
+		errs = append(errs, errors.New("archived_at cannot be negative"))
+	} else if n.ArchivedAt > 0 {
+		if n.ArchivedAt < n.CreatedAt {
+			errs = append(errs, errors.New("archived_at cannot be before created_at"))
+		}
+		if n.ArchivedAt > time.Now().Add(24*time.Hour).Unix() {
+			errs = append(errs, errors.New("archived_at cannot be in the far future"))
+		}
 	}
 
 	if len(n.Payload) == 0 {

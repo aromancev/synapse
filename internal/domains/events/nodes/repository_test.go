@@ -44,6 +44,7 @@ func TestRepository(t *testing.T) {
 		require.Len(t, nodes, 1)
 		assert.Equal(t, id, nodes[0].ID)
 		assert.Equal(t, schemaID, nodes[0].SchemaID)
+		assert.Equal(t, int64(0), nodes[0].ArchivedAt)
 		assert.Equal(t, json.RawMessage(`{"name":"Ada"}`), nodes[0].Payload)
 	})
 
@@ -107,6 +108,40 @@ func TestRepository(t *testing.T) {
 		over := `{"x":"` + strings.Repeat("a", 256*1024) + `"}`
 		err = repo.UpsertNode(context.Background(), db, Node{ID: id, SchemaID: events.StreamID("schema_01HXYZ"), CreatedAt: time.Now().Unix(), Payload: json.RawMessage(over)})
 		require.Error(t, err)
+	})
+
+	t.Run("GetNodesBySchemaID excludes archived nodes", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		schemaID := events.StreamID("schema_01HXYZ")
+		activeID, err := NewID()
+		require.NoError(t, err)
+		archivedID, err := NewID()
+		require.NoError(t, err)
+
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: activeID, SchemaID: schemaID, CreatedAt: 1700000000, Payload: json.RawMessage(`{"name":"Ada"}`)}))
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: archivedID, SchemaID: schemaID, CreatedAt: 1700000010, ArchivedAt: 1700000020, Payload: json.RawMessage(`{"name":"Grace"}`)}))
+
+		nodes, err := repo.GetNodesBySchemaID(ctx, db, schemaID, 10)
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, activeID, nodes[0].ID)
+	})
+
+	t.Run("GetArchivedNodesBySchemaID returns archived nodes", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		schemaID := events.StreamID("schema_01HXYZ")
+		id, err := NewID()
+		require.NoError(t, err)
+
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: id, SchemaID: schemaID, CreatedAt: 1700000000, ArchivedAt: 1700000020, Payload: json.RawMessage(`{"name":"Ada"}`)}))
+
+		nodes, err := repo.GetArchivedNodesBySchemaID(ctx, db, schemaID, 10)
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, id, nodes[0].ID)
+		assert.Equal(t, int64(1700000020), nodes[0].ArchivedAt)
 	})
 
 	t.Run("ID uses prefixed text form", func(t *testing.T) {

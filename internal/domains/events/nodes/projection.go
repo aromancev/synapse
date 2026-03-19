@@ -43,10 +43,11 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		payload = payload.normalized()
 
 		return p.repo.UpsertNode(ctx, db, Node{
-			ID:        payload.ID,
-			SchemaID:  payload.SchemaID,
-			CreatedAt: event.OccurredAt,
-			Payload:   payload.Payload,
+			ID:         payload.ID,
+			SchemaID:   payload.SchemaID,
+			CreatedAt:  event.OccurredAt,
+			ArchivedAt: 0,
+			Payload:    payload.Payload,
 		})
 	case EventTypeNodeUpdated:
 		var payload nodeUpdatedEvent
@@ -64,6 +65,18 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		}
 
 		current.Payload = payload.Payload
+		return p.repo.UpsertNode(ctx, db, current)
+	case EventTypeNodeArchived:
+		nodeID, err := ParseID(event.StreamID.String())
+		if err != nil {
+			return fmt.Errorf("parse node id from stream id: %w", err)
+		}
+		current, err := p.repo.GetNodeByID(ctx, db, nodeID)
+		if err != nil {
+			return fmt.Errorf("get existing node: %w", err)
+		}
+
+		current.ArchivedAt = event.OccurredAt
 		return p.repo.UpsertNode(ctx, db, current)
 	default:
 		return nil
