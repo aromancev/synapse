@@ -219,6 +219,89 @@ func (s *Synapse) UnlinkNodes(ctx context.Context, fromID, toID nodes.ID) error 
 	})
 }
 
+func (s *Synapse) GetLinkedNodes(ctx context.Context, frontier []nodes.ID, depth, breadth int) ([]nodes.Node, error) {
+	if depth < 0 {
+		return nil, errors.New("depth must be non-negative")
+	}
+	if breadth <= 0 {
+		return nil, errors.New("breadth must be positive")
+	}
+	if len(frontier) == 0 {
+		return nil, nil
+	}
+
+	nodesRepo := nodes.NewProjectionRepository()
+	linksRepo := links.NewProjectionRepository()
+
+	seen := make(map[nodes.ID]struct{}, len(frontier))
+	result := make([]nodes.Node, 0, len(frontier))
+	current := dedupeNodeIDs(frontier)
+
+	for level := 0; level <= depth; level++ {
+		fetched, err := nodesRepo.GetNodesByIDs(ctx, s.db, current)
+		if err != nil {
+			return nil, fmt.Errorf("get frontier nodes: %w", err)
+		}
+
+		activeFrontier := make([]nodes.Node, 0, len(fetched))
+		for _, node := range fetched {
+			if node.ArchivedAt > 0 {
+				continue
+			}
+			if _, ok := seen[node.ID]; ok {
+				continue
+			}
+			seen[node.ID] = struct{}{}
+			activeFrontier = append(activeFrontier, node)
+			result = append(result, node)
+		}
+
+		if level == depth || len(activeFrontier) == 0 {
+			break
+		}
+
+		frontierStreamIDs := make([]events.StreamID, 0, len(activeFrontier))
+		for _, node := range activeFrontier {
+			frontierStreamIDs = append(frontierStreamIDs, node.ID.StreamID())
+		}
+
+		outgoing, err := linksRepo.GetLinksFrom(ctx, s.db, frontierStreamIDs, len(frontierStreamIDs)*breadth)
+		if err != nil {
+			return nil, fmt.Errorf("get outgoing links: %w", err)
+		}
+		incoming, err := linksRepo.GetLinksTo(ctx, s.db, frontierStreamIDs, len(frontierStreamIDs)*breadth)
+		if err != nil {
+			return nil, fmt.Errorf("get incoming links: %w", err)
+		}
+
+		candidateIDs := collectLinkedNodeIDs(frontierStreamIDs, outgoing, incoming, seen)
+		if len(candidateIDs) == 0 {
+			break
+		}
+
+		candidateNodes, err := nodesRepo.GetNodesByIDs(ctx, s.db, candidateIDs)
+		if err != nil {
+			return nil, fmt.Errorf("get candidate nodes: %w", err)
+		}
+
+		current = make([]nodes.ID, 0, breadth)
+		for _, node := range candidateNodes {
+			if node.ArchivedAt > 0 {
+				continue
+			}
+			current = append(current, node.ID)
+			if len(current) == breadth {
+				break
+			}
+		}
+		if len(current) == 0 {
+			break
+		}
+	}
+
+	return result, nil
+}
+
 func (s *Synapse) RunProjections(ctx context.Context) error {
 	projections := []projection{
 		schemas.NewProjection(),
@@ -409,6 +492,57 @@ func appendRecordedEvents(ctx context.Context, repo *events.Repository, db sqlx.
 
 func nowUnix() int64 {
 	return time.Now().Unix()
+}
+
+func dedupeNodeIDs(ids []nodes.ID) []nodes.ID {
+	seen := make(map[nodes.ID]struct{}, len(ids))
+	out := make([]nodes.ID, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func collectLinkedNodeIDs(frontier []events.StreamID, outgoing, incoming []links.Link, seen map[nodes.ID]struct{}) []nodes.ID {
+	frontierSet := make(map[events.StreamID]struct{}, len(frontier))
+	for _, id := range frontier {
+		frontierSet[id] = struct{}{}
+	}
+
+	candidateSet := make(map[nodes.ID]struct{})
+	candidates := make([]nodes.ID, 0, len(outgoing)+len(incoming))
+	appendCandidate := func(streamID events.StreamID) {
+		if _, ok := frontierSet[streamID]; ok {
+			return
+		}
+		nodeID, err := nodes.ParseID(streamID.String())
+		if err != nil {
+			return
+		}
+		if _, ok := seen[nodeID]; ok {
+			return
+		}
+		if _, ok := candidateSet[nodeID]; ok {
+			return
+		}
+		candidateSet[nodeID] = struct{}{}
+		candidates = append(candidates, nodeID)
+	}
+
+	for _, link := range outgoing {
+		appendCandidate(link.From)
+		appendCandidate(link.To)
+	}
+	for _, link := range incoming {
+		appendCandidate(link.From)
+		appendCandidate(link.To)
+	}
+
+	return candidates
 }
 
 func normalizeLinkPair(from, to events.StreamID) (events.StreamID, events.StreamID) {

@@ -420,6 +420,79 @@ func TestSynapse_UnlinkNodes(t *testing.T) {
 	})
 }
 
+func TestSynapse_GetLinkedNodes(t *testing.T) {
+	t.Run("walks the graph bidirectionally with depth breadth and archive filtering", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		for _, name := range []string{"Ada", "Grace", "Linus", "Margaret", "Archived"} {
+			require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(fmt.Sprintf(`{"name":%q}`, name))))
+		}
+
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 6)
+
+		var ids []nodes.ID
+		for _, e := range seedEvents[1:] {
+			id, err := nodes.ParseID(e.StreamID.String())
+			require.NoError(t, err)
+			ids = append(ids, id)
+		}
+		adaID, graceID, linusID, margaretID, archivedID := ids[0], ids[1], ids[2], ids[3], ids[4]
+
+		require.NoError(t, svc.LinkNodes(context.Background(), adaID, graceID))
+		require.NoError(t, svc.LinkNodes(context.Background(), graceID, linusID))
+		require.NoError(t, svc.LinkNodes(context.Background(), graceID, margaretID))
+		require.NoError(t, svc.LinkNodes(context.Background(), graceID, archivedID))
+		require.NoError(t, svc.ArchiveNode(context.Background(), archivedID))
+		require.NoError(t, svc.RunProjections(context.Background()))
+
+		linked, err := svc.GetLinkedNodes(context.Background(), []nodes.ID{adaID}, 2, 2)
+		require.NoError(t, err)
+		require.Len(t, linked, 4)
+
+		assert.Equal(t, adaID, linked[0].ID)
+		assert.Contains(t, []nodes.ID{linusID, margaretID}, linked[3].ID)
+
+		got := map[nodes.ID]nodes.Node{}
+		for _, node := range linked {
+			got[node.ID] = node
+			assert.Zero(t, node.ArchivedAt)
+		}
+		assert.Contains(t, got, adaID)
+		assert.Contains(t, got, graceID)
+		assert.Contains(t, got, linusID)
+		assert.Contains(t, got, margaretID)
+		assert.NotContains(t, got, archivedID)
+	})
+
+	t.Run("depth zero returns only active seed nodes", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		_, activeID, archivedID := seedTwoNodes(t, svc, eventsRepo, db)
+		require.NoError(t, svc.ArchiveNode(context.Background(), archivedID))
+		require.NoError(t, svc.RunProjections(context.Background()))
+
+		linked, err := svc.GetLinkedNodes(context.Background(), []nodes.ID{activeID, archivedID, activeID}, 0, 10)
+		require.NoError(t, err)
+		require.Len(t, linked, 1)
+		assert.Equal(t, activeID, linked[0].ID)
+	})
+
+	t.Run("rejects invalid breadth", func(t *testing.T) {
+		svc, _, _ := newTestService(t, nil)
+		linked, err := svc.GetLinkedNodes(context.Background(), nil, 1, 0)
+		require.ErrorContains(t, err, "breadth must be positive")
+		assert.Nil(t, linked)
+	})
+}
+
 func TestSynapse_RunProjections(t *testing.T) {
 	t.Run("catches up all projections and persists iterators", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
