@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/aromancev/synapse/internal/platform/sqlx"
@@ -72,6 +73,46 @@ WHERE id = ?;
 	}
 
 	return n, nil
+}
+
+func (r *ProjectionRepository) GetNodesByIDs(ctx context.Context, db sqlx.DB, ids []ID) ([]Node, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	placeholders := inPlaceholders(len(ids))
+	query := fmt.Sprintf(`
+SELECT id, schema_id, created_at, archived_at, payload
+FROM nodes
+WHERE id IN (%s)
+ORDER BY created_at DESC;
+`, placeholders)
+
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query nodes by ids: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Node
+	for rows.Next() {
+		var n Node
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload); err != nil {
+			return nil, fmt.Errorf("scan node: %w", err)
+		}
+		out = append(out, n)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate nodes: %w", err)
+	}
+
+	return out, nil
 }
 
 func (r *ProjectionRepository) GetNodesBySchemaID(ctx context.Context, db sqlx.DB, schemaID events.StreamID, limit int) ([]Node, error) {
@@ -142,4 +183,15 @@ LIMIT ?;
 	}
 
 	return out, nil
+}
+
+func inPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
 }
