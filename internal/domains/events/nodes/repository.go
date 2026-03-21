@@ -11,6 +11,13 @@ import (
 	"github.com/aromancev/synapse/internal/platform/sqlx"
 )
 
+const nodesFTSTable = "nodes_fts"
+
+type SearchHit struct {
+	ID    ID
+	Score float64
+}
+
 type ProjectionRepository struct{}
 
 func NewProjectionRepository() *ProjectionRepository {
@@ -24,10 +31,16 @@ CREATE TABLE IF NOT EXISTS nodes (
 	schema_id TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
 	archived_at INTEGER NOT NULL DEFAULT 0,
-	payload JSON NOT NULL
+	payload JSON NOT NULL,
+	search_text TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS nodes_schema_id_created_at_desc_idx ON nodes(schema_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS nodes_schema_id_archived_at_created_at_desc_idx ON nodes(schema_id, archived_at, created_at DESC);
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+	node_id,
+	search_text,
+	tokenize='unicode61'
+);
 `
 
 	_, err := db.ExecContext(ctx, query)
@@ -42,16 +55,21 @@ func (r *ProjectionRepository) UpsertNode(ctx context.Context, db sqlx.DB, n Nod
 	}
 
 	const query = `
-INSERT INTO nodes(id, schema_id, created_at, archived_at, payload)
-VALUES(?, ?, ?, ?, ?)
+INSERT INTO nodes(id, schema_id, created_at, archived_at, payload, search_text)
+VALUES(?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	schema_id = excluded.schema_id,
 	created_at = excluded.created_at,
 	archived_at = excluded.archived_at,
-	payload = excluded.payload;
+	payload = excluded.payload,
+	search_text = excluded.search_text;
 `
-	if _, err := db.ExecContext(ctx, query, n.ID, n.SchemaID, n.CreatedAt, n.ArchivedAt, n.Payload); err != nil {
+	if _, err := db.ExecContext(ctx, query, n.ID, n.SchemaID, n.CreatedAt, n.ArchivedAt, n.Payload, n.SearchText); err != nil {
 		return fmt.Errorf("upsert node: %w", err)
+	}
+
+	if err := r.updateSearchIndex(ctx, db, n); err != nil {
+		return err
 	}
 
 	return nil
@@ -59,13 +77,13 @@ ON CONFLICT(id) DO UPDATE SET
 
 func (r *ProjectionRepository) GetNodeByID(ctx context.Context, db sqlx.DB, id ID) (Node, error) {
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload
+SELECT id, schema_id, created_at, archived_at, payload, search_text
 FROM nodes
 WHERE id = ?;
 `
 
 	var n Node
-	if err := db.QueryRowContext(ctx, query, id).Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload); err != nil {
+	if err := db.QueryRowContext(ctx, query, id).Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Node{}, fmt.Errorf("node not found: %s", id)
 		}
@@ -82,7 +100,7 @@ func (r *ProjectionRepository) GetNodesByIDs(ctx context.Context, db sqlx.DB, id
 
 	placeholders := inPlaceholders(len(ids))
 	query := fmt.Sprintf(`
-SELECT id, schema_id, created_at, archived_at, payload
+SELECT id, schema_id, created_at, archived_at, payload, search_text
 FROM nodes
 WHERE id IN (%s)
 ORDER BY created_at DESC;
@@ -102,7 +120,7 @@ ORDER BY created_at DESC;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload); err != nil {
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
 		out = append(out, n)
@@ -121,7 +139,7 @@ func (r *ProjectionRepository) GetNodesBySchemaID(ctx context.Context, db sqlx.D
 	}
 
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload
+SELECT id, schema_id, created_at, archived_at, payload, search_text
 FROM nodes
 WHERE schema_id = ? AND archived_at = 0
 ORDER BY created_at DESC
@@ -137,7 +155,7 @@ LIMIT ?;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload); err != nil {
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
 		out = append(out, n)
@@ -156,7 +174,7 @@ func (r *ProjectionRepository) GetArchivedNodesBySchemaID(ctx context.Context, d
 	}
 
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload
+SELECT id, schema_id, created_at, archived_at, payload, search_text
 FROM nodes
 WHERE schema_id = ? AND archived_at > 0
 ORDER BY archived_at DESC, created_at DESC
@@ -172,7 +190,7 @@ LIMIT ?;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload); err != nil {
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan archived node: %w", err)
 		}
 		out = append(out, n)
@@ -183,6 +201,68 @@ LIMIT ?;
 	}
 
 	return out, nil
+}
+
+func (r *ProjectionRepository) SearchNodeIDs(ctx context.Context, db sqlx.DB, query string, limit int) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	const searchQuery = `
+SELECT node_id, bm25(nodes_fts) AS score
+FROM nodes_fts
+WHERE nodes_fts MATCH ?
+ORDER BY score
+LIMIT ?;
+`
+
+	rows, err := db.QueryContext(ctx, searchQuery, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search node ids: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []SearchHit
+	for rows.Next() {
+		var nodeID string
+		var hit SearchHit
+		if err := rows.Scan(&nodeID, &hit.Score); err != nil {
+			return nil, fmt.Errorf("scan search hit: %w", err)
+		}
+		hit.ID, err = ParseID(nodeID)
+		if err != nil {
+			return nil, fmt.Errorf("parse search hit id: %w", err)
+		}
+		hits = append(hits, hit)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search hits: %w", err)
+	}
+
+	return hits, nil
+}
+
+func (r *ProjectionRepository) updateSearchIndex(ctx context.Context, db sqlx.DB, n Node) error {
+	const deleteQuery = `DELETE FROM nodes_fts WHERE node_id = ?;`
+	if _, err := db.ExecContext(ctx, deleteQuery, n.ID.String()); err != nil {
+		return fmt.Errorf("delete node from fts: %w", err)
+	}
+
+	if n.ArchivedAt > 0 || strings.TrimSpace(n.SearchText) == "" {
+		return nil
+	}
+
+	const insertQuery = `INSERT INTO nodes_fts(node_id, search_text) VALUES(?, ?);`
+	if _, err := db.ExecContext(ctx, insertQuery, n.ID.String(), n.SearchText); err != nil {
+		return fmt.Errorf("insert node into fts: %w", err)
+	}
+
+	return nil
 }
 
 func inPlaceholders(n int) string {

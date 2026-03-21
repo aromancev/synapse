@@ -48,6 +48,7 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 			CreatedAt:  event.OccurredAt,
 			ArchivedAt: 0,
 			Payload:    payload.Payload,
+			SearchText: BuildSearchText(payload.Payload),
 		})
 	case EventTypeNodeUpdated:
 		var payload nodeUpdatedEvent
@@ -65,6 +66,7 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		}
 
 		current.Payload = payload.Payload
+		current.SearchText = BuildSearchText(payload.Payload)
 		return p.repo.UpsertNode(ctx, db, current)
 	case EventTypeNodeArchived:
 		nodeID, err := ParseID(event.StreamID.String())

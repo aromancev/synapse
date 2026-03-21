@@ -219,6 +219,24 @@ func (s *Synapse) UnlinkNodes(ctx context.Context, fromID, toID nodes.ID) error 
 	})
 }
 
+func (s *Synapse) SearchNodes(ctx context.Context, query string, limit int) ([]nodes.ID, error) {
+	nodesRepo := nodes.NewProjectionRepository()
+	hits, err := nodesRepo.SearchNodeIDs(ctx, s.db, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search node ids: %w", err)
+	}
+	if len(hits) == 0 {
+		return nil, nil
+	}
+
+	ids := make([]nodes.ID, 0, len(hits))
+	for _, hit := range hits {
+		ids = append(ids, hit.ID)
+	}
+
+	return ids, nil
+}
+
 func (s *Synapse) GetLinkedNodes(ctx context.Context, frontier []nodes.ID, depth, breadth int) ([]nodes.Node, error) {
 	if depth < 0 {
 		return nil, errors.New("depth must be non-negative")
