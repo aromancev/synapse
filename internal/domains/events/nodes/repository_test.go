@@ -46,6 +46,7 @@ func TestRepository(t *testing.T) {
 		assert.Equal(t, schemaID, nodes[0].SchemaID)
 		assert.Equal(t, int64(0), nodes[0].ArchivedAt)
 		assert.Equal(t, json.RawMessage(`{"name":"Ada"}`), nodes[0].Payload)
+		assert.Equal(t, "name Ada", nodes[0].SearchText)
 	})
 
 	t.Run("GetNodeByID returns stored node", func(t *testing.T) {
@@ -142,6 +143,28 @@ func TestRepository(t *testing.T) {
 		require.Len(t, nodes, 1)
 		assert.Equal(t, id, nodes[0].ID)
 		assert.Equal(t, int64(1700000020), nodes[0].ArchivedAt)
+	})
+
+	t.Run("SearchNodeIDs returns active matches from fts", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		schemaID := events.StreamID("schema_01HXYZ")
+		adaID, err := NewID()
+		require.NoError(t, err)
+		graceID, err := NewID()
+		require.NoError(t, err)
+
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: adaID, SchemaID: schemaID, CreatedAt: 1700000000, Payload: json.RawMessage(`{"name":"Ada Lovelace","summary":"analytical engine pioneer"}`)}))
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: graceID, SchemaID: schemaID, CreatedAt: 1700000010, ArchivedAt: 1700000020, Payload: json.RawMessage(`{"name":"Grace Hopper"}`)}))
+
+		hits, err := repo.SearchNodeIDs(ctx, db, "analytical", 10)
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		assert.Equal(t, adaID, hits[0].ID)
+
+		hits, err = repo.SearchNodeIDs(ctx, db, "Grace", 10)
+		require.NoError(t, err)
+		assert.Empty(t, hits)
 	})
 
 	t.Run("ID uses prefixed text form", func(t *testing.T) {

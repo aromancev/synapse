@@ -420,6 +420,40 @@ func TestSynapse_UnlinkNodes(t *testing.T) {
 	})
 }
 
+func TestSynapse_SearchNodes(t *testing.T) {
+	t.Run("returns active nodes in fts rank order", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"summary":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada Lovelace","summary":"analytical engine pioneer"}`)))
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace Hopper","summary":"compiler pioneer"}`)))
+		require.NoError(t, svc.RunProjections(context.Background()))
+
+		results, err := svc.SearchNodes(context.Background(), "analytical", 10)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+
+		stored, err := nodes.NewProjectionRepository().GetNodesByIDs(context.Background(), db, results)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.JSONEq(t, `{"name":"Ada Lovelace","summary":"analytical engine pioneer"}`, string(stored[0].Payload))
+		assert.Equal(t, "name Ada Lovelace summary analytical engine pioneer", stored[0].SearchText)
+	})
+
+	t.Run("returns nil for blank query", func(t *testing.T) {
+		svc, _, _ := newTestService(t, nil)
+		results, err := svc.SearchNodes(context.Background(), "   ", 10)
+		require.NoError(t, err)
+		assert.Nil(t, results)
+	})
+}
+
 func TestSynapse_GetLinkedNodes(t *testing.T) {
 	t.Run("walks the graph bidirectionally with depth breadth and archive filtering", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)

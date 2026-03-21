@@ -88,6 +88,7 @@ type Node struct {
 	CreatedAt  int64           `json:"created_at"`
 	ArchivedAt int64           `json:"archived_at"`
 	Payload    json.RawMessage `json:"payload"`
+	SearchText string          `json:"search_text"`
 }
 
 // Normalized returns a normalized copy of the node.
@@ -98,6 +99,11 @@ func (n Node) Normalized() Node {
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, []byte(n.Payload)); err == nil {
 		n.Payload = json.RawMessage(compact.Bytes())
+	}
+
+	n.SearchText = strings.Join(strings.Fields(strings.TrimSpace(n.SearchText)), " ")
+	if n.SearchText == "" && len(n.Payload) > 0 {
+		n.SearchText = BuildSearchText(n.Payload)
 	}
 
 	return n
