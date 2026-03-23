@@ -86,6 +86,29 @@ func TestAggregate_Update(t *testing.T) {
 	})
 }
 
+func TestAggregate_UpdateKeywords(t *testing.T) {
+	t.Run("records node keywords updated event", func(t *testing.T) {
+		id, err := NewID()
+		require.NoError(t, err)
+
+		stream := events.NewStream(events.StreamID(id.String()), StreamTypeNode, nil)
+		aggregate := &Aggregate{}
+		require.NoError(t, aggregate.Create(context.Background(), stream, json.RawMessage(`{"name":"Ada"}`), id, events.StreamID("schema_01HXYZ")))
+		require.NoError(t, replayAggregate(t, aggregate, stream.RecordedEvents()[:1]))
+
+		err = aggregate.UpdateKeywords(context.Background(), stream, []string{"  Math  ", "history", "math"})
+		require.NoError(t, err)
+
+		recorded := stream.RecordedEvents()
+		require.Len(t, recorded, 2)
+		assert.Equal(t, EventTypeNodeKeywordsUpdated, recorded[1].EventType)
+
+		var payload map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(recorded[1].Payload, &payload))
+		assert.JSONEq(t, `["math","history"]`, string(payload["keywords"]))
+	})
+}
+
 func TestAggregate_Archive(t *testing.T) {
 	t.Run("records node archived event", func(t *testing.T) {
 		id, err := NewID()

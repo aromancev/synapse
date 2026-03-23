@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 	created_at INTEGER NOT NULL,
 	archived_at INTEGER NOT NULL DEFAULT 0,
 	payload JSON NOT NULL,
+	keywords JSON NOT NULL DEFAULT '[]',
 	search_text TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS nodes_schema_id_created_at_desc_idx ON nodes(schema_id, created_at DESC);
@@ -54,17 +56,23 @@ func (r *ProjectionRepository) UpsertNode(ctx context.Context, db sqlx.DB, n Nod
 		return errors.Join(validationErrors...)
 	}
 
+	keywordsJSON, err := jsonKeywords(n.Keywords)
+	if err != nil {
+		return err
+	}
+
 	const query = `
-INSERT INTO nodes(id, schema_id, created_at, archived_at, payload, search_text)
-VALUES(?, ?, ?, ?, ?, ?)
+INSERT INTO nodes(id, schema_id, created_at, archived_at, payload, keywords, search_text)
+VALUES(?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	schema_id = excluded.schema_id,
 	created_at = excluded.created_at,
 	archived_at = excluded.archived_at,
 	payload = excluded.payload,
+	keywords = excluded.keywords,
 	search_text = excluded.search_text;
 `
-	if _, err := db.ExecContext(ctx, query, n.ID, n.SchemaID, n.CreatedAt, n.ArchivedAt, n.Payload, n.SearchText); err != nil {
+	if _, err := db.ExecContext(ctx, query, n.ID, n.SchemaID, n.CreatedAt, n.ArchivedAt, n.Payload, keywordsJSON, n.SearchText); err != nil {
 		return fmt.Errorf("upsert node: %w", err)
 	}
 
@@ -77,18 +85,24 @@ ON CONFLICT(id) DO UPDATE SET
 
 func (r *ProjectionRepository) GetNodeByID(ctx context.Context, db sqlx.DB, id ID) (Node, error) {
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload, search_text
+SELECT id, schema_id, created_at, archived_at, payload, keywords, search_text
 FROM nodes
 WHERE id = ?;
 `
 
 	var n Node
-	if err := db.QueryRowContext(ctx, query, id).Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
+	var keywordsJSON []byte
+	if err := db.QueryRowContext(ctx, query, id).Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &keywordsJSON, &n.SearchText); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Node{}, fmt.Errorf("node not found: %s", id)
 		}
 		return Node{}, fmt.Errorf("get node by id: %w", err)
 	}
+	keywords, err := parseKeywords(keywordsJSON)
+	if err != nil {
+		return Node{}, err
+	}
+	n.Keywords = keywords
 
 	return n, nil
 }
@@ -100,7 +114,7 @@ func (r *ProjectionRepository) GetNodesByIDs(ctx context.Context, db sqlx.DB, id
 
 	placeholders := inPlaceholders(len(ids))
 	query := fmt.Sprintf(`
-SELECT id, schema_id, created_at, archived_at, payload, search_text
+SELECT id, schema_id, created_at, archived_at, payload, keywords, search_text
 FROM nodes
 WHERE id IN (%s)
 ORDER BY created_at DESC;
@@ -120,9 +134,15 @@ ORDER BY created_at DESC;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
+		var keywordsJSON []byte
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &keywordsJSON, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
+		keywords, err := parseKeywords(keywordsJSON)
+		if err != nil {
+			return nil, err
+		}
+		n.Keywords = keywords
 		out = append(out, n)
 	}
 
@@ -139,7 +159,7 @@ func (r *ProjectionRepository) GetNodesBySchemaID(ctx context.Context, db sqlx.D
 	}
 
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload, search_text
+SELECT id, schema_id, created_at, archived_at, payload, keywords, search_text
 FROM nodes
 WHERE schema_id = ? AND archived_at = 0
 ORDER BY created_at DESC
@@ -155,9 +175,15 @@ LIMIT ?;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
+		var keywordsJSON []byte
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &keywordsJSON, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
+		keywords, err := parseKeywords(keywordsJSON)
+		if err != nil {
+			return nil, err
+		}
+		n.Keywords = keywords
 		out = append(out, n)
 	}
 
@@ -174,7 +200,7 @@ func (r *ProjectionRepository) GetArchivedNodesBySchemaID(ctx context.Context, d
 	}
 
 	const query = `
-SELECT id, schema_id, created_at, archived_at, payload, search_text
+SELECT id, schema_id, created_at, archived_at, payload, keywords, search_text
 FROM nodes
 WHERE schema_id = ? AND archived_at > 0
 ORDER BY archived_at DESC, created_at DESC
@@ -190,9 +216,15 @@ LIMIT ?;
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &n.SearchText); err != nil {
+		var keywordsJSON []byte
+		if err := rows.Scan(&n.ID, &n.SchemaID, &n.CreatedAt, &n.ArchivedAt, &n.Payload, &keywordsJSON, &n.SearchText); err != nil {
 			return nil, fmt.Errorf("scan archived node: %w", err)
 		}
+		keywords, err := parseKeywords(keywordsJSON)
+		if err != nil {
+			return nil, err
+		}
+		n.Keywords = keywords
 		out = append(out, n)
 	}
 
@@ -263,6 +295,27 @@ func (r *ProjectionRepository) updateSearchIndex(ctx context.Context, db sqlx.DB
 	}
 
 	return nil
+}
+
+func parseKeywords(data []byte) ([]string, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var keywords []string
+	if err := json.Unmarshal(data, &keywords); err != nil {
+		return nil, fmt.Errorf("unmarshal node keywords: %w", err)
+	}
+
+	return NormalizeKeywords(keywords), nil
+}
+
+func jsonKeywords(keywords []string) ([]byte, error) {
+	data, err := json.Marshal(NormalizeKeywords(keywords))
+	if err != nil {
+		return nil, fmt.Errorf("marshal node keywords: %w", err)
+	}
+	return data, nil
 }
 
 func inPlaceholders(n int) string {

@@ -48,7 +48,7 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 			CreatedAt:  event.OccurredAt,
 			ArchivedAt: 0,
 			Payload:    payload.Payload,
-			SearchText: BuildSearchText(payload.Payload),
+			SearchText: BuildSearchText(payload.Payload, nil),
 		})
 	case EventTypeNodeUpdated:
 		var payload nodeUpdatedEvent
@@ -66,7 +66,26 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		}
 
 		current.Payload = payload.Payload
-		current.SearchText = BuildSearchText(payload.Payload)
+		current.SearchText = BuildSearchText(current.Payload, current.Keywords)
+		return p.repo.UpsertNode(ctx, db, current)
+	case EventTypeNodeKeywordsUpdated:
+		var payload nodeKeywordsUpdatedEvent
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("unmarshal node.keywords_updated payload: %w", err)
+		}
+		payload = payload.normalized()
+
+		nodeID, err := ParseID(event.StreamID.String())
+		if err != nil {
+			return fmt.Errorf("parse node id from stream id: %w", err)
+		}
+		current, err := p.repo.GetNodeByID(ctx, db, nodeID)
+		if err != nil {
+			return fmt.Errorf("get existing node: %w", err)
+		}
+
+		current.Keywords = payload.Keywords
+		current.SearchText = BuildSearchText(current.Payload, current.Keywords)
 		return p.repo.UpsertNode(ctx, db, current)
 	case EventTypeNodeArchived:
 		nodeID, err := ParseID(event.StreamID.String())

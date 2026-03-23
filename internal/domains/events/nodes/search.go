@@ -7,21 +7,25 @@ import (
 	"strings"
 )
 
-// BuildSearchText converts dynamic JSON payloads into a deterministic,
+// BuildSearchText converts payload JSON and keywords into a deterministic,
 // human-searchable text representation suitable for FTS indexing.
-func BuildSearchText(payload json.RawMessage) string {
-	payload = json.RawMessage(bytes.TrimSpace(payload))
-	if len(payload) == 0 {
-		return ""
-	}
-
-	var value any
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return strings.TrimSpace(string(payload))
-	}
-
+func BuildSearchText(payload json.RawMessage, keywords []string) string {
 	parts := make([]string, 0, 16)
-	appendSearchParts(&parts, value)
+
+	payload = json.RawMessage(bytes.TrimSpace(payload))
+	if len(payload) > 0 {
+		var value any
+		if err := json.Unmarshal(payload, &value); err != nil {
+			appendToken(&parts, strings.TrimSpace(string(payload)))
+		} else {
+			appendSearchParts(&parts, value)
+		}
+	}
+
+	for _, keyword := range NormalizeKeywords(keywords) {
+		appendToken(&parts, keyword)
+	}
+
 	return strings.Join(parts, " ")
 }
 

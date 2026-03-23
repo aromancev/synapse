@@ -46,6 +46,7 @@ func TestRepository(t *testing.T) {
 		assert.Equal(t, schemaID, nodes[0].SchemaID)
 		assert.Equal(t, int64(0), nodes[0].ArchivedAt)
 		assert.Equal(t, json.RawMessage(`{"name":"Ada"}`), nodes[0].Payload)
+		assert.Empty(t, nodes[0].Keywords)
 		assert.Equal(t, "name Ada", nodes[0].SearchText)
 	})
 
@@ -143,6 +144,20 @@ func TestRepository(t *testing.T) {
 		require.Len(t, nodes, 1)
 		assert.Equal(t, id, nodes[0].ID)
 		assert.Equal(t, int64(1700000020), nodes[0].ArchivedAt)
+	})
+
+	t.Run("stores and loads normalized keywords", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		id, err := NewID()
+		require.NoError(t, err)
+
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: id, SchemaID: events.StreamID("schema_01HXYZ"), CreatedAt: 1700000000, Payload: json.RawMessage(`{"name":"Ada"}`), Keywords: []string{"  Math  ", "history", "math"}}))
+
+		node, err := repo.GetNodeByID(ctx, db, id)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"math", "history"}, node.Keywords)
+		assert.Equal(t, "name Ada math history", node.SearchText)
 	})
 
 	t.Run("SearchNodeIDs returns active matches from fts", func(t *testing.T) {
