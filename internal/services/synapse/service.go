@@ -286,6 +286,26 @@ func (s *Synapse) UnlinkNodes(ctx context.Context, fromID, toID nodes.ID) error 
 	})
 }
 
+func (s *Synapse) GetSchemas(ctx context.Context) ([]schemas.Schema, error) {
+	schemasRepo := schemas.NewProjectionRepository()
+	storedSchemas, err := schemasRepo.GetSchemas(ctx, s.db)
+	if err != nil {
+		return nil, fmt.Errorf("get schemas: %w", err)
+	}
+
+	return storedSchemas, nil
+}
+
+func (s *Synapse) GetArchivedSchemas(ctx context.Context) ([]schemas.Schema, error) {
+	schemasRepo := schemas.NewProjectionRepository()
+	storedSchemas, err := schemasRepo.GetArchivedSchemas(ctx, s.db)
+	if err != nil {
+		return nil, fmt.Errorf("get archived schemas: %w", err)
+	}
+
+	return storedSchemas, nil
+}
+
 func (s *Synapse) SearchNodes(ctx context.Context, query string, limit int) ([]nodes.ID, error) {
 	nodesRepo := nodes.NewProjectionRepository()
 	hits, err := nodesRepo.SearchNodeIDs(ctx, s.db, query, limit)

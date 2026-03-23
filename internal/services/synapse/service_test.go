@@ -137,6 +137,41 @@ func TestSynapse_AddNode(t *testing.T) {
 	})
 }
 
+func TestSynapse_GetSchemas(t *testing.T) {
+	t.Run("returns live and archived schemas through separate service methods", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
+		require.NoError(t, svc.AddSchema(context.Background(), "company", json.RawMessage(`{"type":"object"}`)))
+
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+
+		personID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+		companyID, err := schemas.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.ArchiveSchema(context.Background(), companyID))
+		require.NoError(t, svc.RunProjection(context.Background(), schemas.NewProjection()))
+
+		liveSchemas, err := svc.GetSchemas(context.Background())
+		require.NoError(t, err)
+		require.Len(t, liveSchemas, 1)
+		assert.Equal(t, personID, liveSchemas[0].ID)
+		assert.Equal(t, "person", liveSchemas[0].Name)
+		assert.Zero(t, liveSchemas[0].ArchivedAt)
+
+		archivedSchemas, err := svc.GetArchivedSchemas(context.Background())
+		require.NoError(t, err)
+		require.Len(t, archivedSchemas, 1)
+		assert.Equal(t, companyID, archivedSchemas[0].ID)
+		assert.Equal(t, "company", archivedSchemas[0].Name)
+		assert.Positive(t, archivedSchemas[0].ArchivedAt)
+	})
+}
+
 func TestSynapse_ArchiveSchema(t *testing.T) {
 	t.Run("appends schema archived event and projections mark stored schema as archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
