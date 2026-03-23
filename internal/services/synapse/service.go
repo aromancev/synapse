@@ -97,6 +97,9 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON 
 	if err != nil {
 		return err
 	}
+	if schemaAggregate.Archived() {
+		return errors.New("schema is archived")
+	}
 	if err := schemaAggregate.Validate(ctx, node.Payload); err != nil {
 		return fmt.Errorf("validate node payload against schema: %w", err)
 	}
@@ -192,6 +195,38 @@ func (s *Synapse) UpdateNodeKeywords(ctx context.Context, nodeID nodes.ID, keywo
 
 	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
 		return fmt.Errorf("append node events: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Synapse) ArchiveSchema(ctx context.Context, schemaID schemas.ID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository()
+	aggregate, err := loadExistingSchemaAggregate(ctx, eventsRepo, tx, schemaID)
+	if err != nil {
+		return err
+	}
+	stream, err := loadStream(ctx, eventsRepo, tx, schemaID.StreamID(), schemas.StreamTypeSchema)
+	if err != nil {
+		return fmt.Errorf("load schema stream: %w", err)
+	}
+
+	if err := aggregate.Archive(ctx, stream); err != nil {
+		return fmt.Errorf("aggregate archive schema: %w", err)
+	}
+
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append schema events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -494,6 +529,17 @@ func loadSchemaAggregate(ctx context.Context, repo *events.Repository, db sqlx.D
 	aggregate := &schemas.Aggregate{}
 	if err := replayAggregate(ctx, aggregate, stream); err != nil {
 		return nil, fmt.Errorf("replay schema aggregate: %w", err)
+	}
+	return aggregate, nil
+}
+
+func loadExistingSchemaAggregate(ctx context.Context, repo *events.Repository, db sqlx.DB, id schemas.ID) (*schemas.Aggregate, error) {
+	aggregate, err := loadSchemaAggregate(ctx, repo, db, id)
+	if err != nil {
+		return nil, err
+	}
+	if !aggregate.Exists() {
+		return nil, fmt.Errorf("schema does not exist: %s", id)
 	}
 	return aggregate, nil
 }

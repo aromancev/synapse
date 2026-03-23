@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/aromancev/synapse/internal/domains/events"
 	"github.com/oklog/ulid/v2"
@@ -85,9 +86,10 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 
 // Schema describes a named JSON schema persisted in the database.
 type Schema struct {
-	ID     ID              `json:"id"`
-	Name   string          `json:"name"`
-	Schema json.RawMessage `json:"schema"`
+	ID         ID              `json:"id"`
+	Name       string          `json:"name"`
+	Schema     json.RawMessage `json:"schema"`
+	ArchivedAt int64           `json:"archived_at"`
 }
 
 // Normalized returns a normalized copy of the schema.
@@ -119,6 +121,11 @@ func (s Schema) Validate() []error {
 		if !schemaNameRe.MatchString(s.Name) {
 			errs = append(errs, errors.New("schema name must be snake_case with lowercase latin letters and numbers only"))
 		}
+	}
+	if s.ArchivedAt < 0 {
+		errs = append(errs, errors.New("archived_at cannot be negative"))
+	} else if s.ArchivedAt > 0 && s.ArchivedAt > time.Now().Add(24*time.Hour).Unix() {
+		errs = append(errs, errors.New("archived_at cannot be in the far future"))
 	}
 	if len(s.Schema) > 16*1024 {
 		errs = append(errs, errors.New("schema must not exceed 16KB"))

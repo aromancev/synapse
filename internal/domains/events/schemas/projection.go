@@ -43,10 +43,23 @@ func (p *Projection) Project(ctx context.Context, db sqlx.DB, event events.Event
 		payload = payload.normalized()
 
 		return p.repo.UpsertSchema(ctx, db, Schema{
-			ID:     payload.ID,
-			Name:   payload.Name,
-			Schema: payload.Schema,
+			ID:         payload.ID,
+			Name:       payload.Name,
+			Schema:     payload.Schema,
+			ArchivedAt: 0,
 		})
+	case EventTypeSchemaArchived:
+		schemaID, err := ParseID(event.StreamID.String())
+		if err != nil {
+			return fmt.Errorf("parse schema id from stream id: %w", err)
+		}
+		current, err := p.repo.GetSchemaByID(ctx, db, schemaID)
+		if err != nil {
+			return fmt.Errorf("get existing schema: %w", err)
+		}
+
+		current.ArchivedAt = event.OccurredAt
+		return p.repo.UpsertSchema(ctx, db, current)
 	default:
 		return nil
 	}

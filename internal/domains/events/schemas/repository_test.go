@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,7 +55,49 @@ func TestRepository(t *testing.T) {
 		require.Len(t, schemas, 1)
 		assert.Equal(t, schemaID, schemas[0].ID)
 		assert.Equal(t, "person", schemas[0].Name)
+		assert.Equal(t, int64(0), schemas[0].ArchivedAt)
 		assert.Equal(t, json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`), schemas[0].Schema)
+	})
+
+	t.Run("GetSchemaByID returns stored schema", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		schemaID := mustNewID(t)
+		require.NoError(t, repo.UpsertSchema(ctx, db, Schema{ID: schemaID, Name: "person", Schema: json.RawMessage(`{"type":"object"}`)}))
+
+		stored, err := repo.GetSchemaByID(ctx, db, schemaID)
+		require.NoError(t, err)
+		assert.Equal(t, schemaID, stored.ID)
+		assert.Equal(t, "person", stored.Name)
+	})
+
+	t.Run("GetSchemas excludes archived schemas", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		activeID := mustNewID(t)
+		archivedID := mustNewID(t)
+
+		require.NoError(t, repo.UpsertSchema(ctx, db, Schema{ID: activeID, Name: "active", Schema: json.RawMessage(`{"type":"object"}`)}))
+		require.NoError(t, repo.UpsertSchema(ctx, db, Schema{ID: archivedID, Name: "archived", Schema: json.RawMessage(`{"type":"object"}`), ArchivedAt: time.Now().Unix()}))
+
+		schemas, err := repo.GetSchemas(ctx, db)
+		require.NoError(t, err)
+		require.Len(t, schemas, 1)
+		assert.Equal(t, activeID, schemas[0].ID)
+	})
+
+	t.Run("GetArchivedSchemas returns archived schemas", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		id := mustNewID(t)
+		archivedAt := time.Now().Unix()
+		require.NoError(t, repo.UpsertSchema(ctx, db, Schema{ID: id, Name: "archived", Schema: json.RawMessage(`{"type":"object"}`), ArchivedAt: archivedAt}))
+
+		schemas, err := repo.GetArchivedSchemas(ctx, db)
+		require.NoError(t, err)
+		require.Len(t, schemas, 1)
+		assert.Equal(t, id, schemas[0].ID)
+		assert.Equal(t, archivedAt, schemas[0].ArchivedAt)
 	})
 
 	t.Run("UpsertSchema fails for empty id", func(t *testing.T) {

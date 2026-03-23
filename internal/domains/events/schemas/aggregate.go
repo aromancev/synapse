@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	StreamTypeSchema       events.StreamType = "schema"
-	EventTypeSchemaCreated events.EventType  = "schema.created"
+	StreamTypeSchema        events.StreamType = "schema"
+	EventTypeSchemaCreated  events.EventType  = "schema.created"
+	EventTypeSchemaArchived events.EventType  = "schema.archived"
 )
 
 type createdEvent struct {
@@ -81,6 +82,7 @@ type Aggregate struct {
 	id             ID
 	name           string
 	compiledSchema *jsonschema.Schema
+	archivedAt     int64
 }
 
 func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
@@ -89,6 +91,8 @@ func (a *Aggregate) Apply(ctx context.Context, event events.Event) error {
 	switch event.EventType {
 	case EventTypeSchemaCreated:
 		return a.applyCreated(event)
+	case EventTypeSchemaArchived:
+		return a.applyArchived(event)
 	default:
 		return nil
 	}
@@ -122,6 +126,11 @@ func (a *Aggregate) applyCreated(event events.Event) error {
 	return nil
 }
 
+func (a *Aggregate) applyArchived(event events.Event) error {
+	a.archivedAt = event.OccurredAt
+	return nil
+}
+
 // Validate validates a JSON payload against the compiled schema.
 func (a *Aggregate) Validate(ctx context.Context, payload json.RawMessage) error {
 	_ = ctx
@@ -136,6 +145,10 @@ func (a *Aggregate) Validate(ctx context.Context, payload json.RawMessage) error
 	return a.compiledSchema.Validate(doc)
 }
 
+func (a *Aggregate) Exists() bool      { return a.compiledSchema != nil }
+func (a *Aggregate) Archived() bool    { return a.archivedAt > 0 }
+func (a *Aggregate) ArchivedAt() int64 { return a.archivedAt }
+
 func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, id ID, name string, schemaJSON json.RawMessage) error {
 	_ = ctx
 
@@ -149,5 +162,23 @@ func (a *Aggregate) Create(ctx context.Context, stream *events.Stream, id ID, na
 		EventVersion: 1,
 		OccurredAt:   time.Now().Unix(),
 		Payload:      eventPayload,
+	})
+}
+
+func (a *Aggregate) Archive(ctx context.Context, stream *events.Stream) error {
+	_ = ctx
+
+	if !a.Exists() {
+		return errors.New("schema does not exist")
+	}
+	if a.Archived() {
+		return errors.New("schema is already archived")
+	}
+
+	return stream.Record(events.Request{
+		EventType:    EventTypeSchemaArchived,
+		EventVersion: 1,
+		OccurredAt:   time.Now().Unix(),
+		Payload:      struct{}{},
 	})
 }
