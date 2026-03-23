@@ -116,6 +116,104 @@ func TestSynapse_AddNode(t *testing.T) {
 		require.NoError(t, streamErr)
 		assert.Len(t, eventsInStream, 1)
 	})
+
+	t.Run("fails when schema is archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.ArchiveSchema(context.Background(), schemaID))
+		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.ErrorContains(t, err, "schema is archived")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 2)
+	})
+}
+
+func TestSynapse_ArchiveSchema(t *testing.T) {
+	t.Run("appends schema archived event and projections mark stored schema as archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.RunProjection(context.Background(), schemas.NewProjection()))
+		_, err = schemas.NewProjectionRepository().GetSchemaByID(context.Background(), db, schemaID)
+		require.NoError(t, err)
+
+		before := time.Now().Unix()
+		err = svc.ArchiveSchema(context.Background(), schemaID)
+		after := time.Now().Unix()
+		require.NoError(t, err)
+
+		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, eventsInStream, 2)
+
+		e := eventsInStream[1]
+		assert.Equal(t, schemaID.StreamID(), e.StreamID)
+		assert.Equal(t, schemas.StreamTypeSchema, e.StreamType)
+		assert.Equal(t, schemas.EventTypeSchemaArchived, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+		assert.GreaterOrEqual(t, e.OccurredAt, before)
+		assert.LessOrEqual(t, e.OccurredAt, after)
+
+		require.NoError(t, svc.RunProjection(context.Background(), schemas.NewProjection()))
+		stored, err := schemas.NewProjectionRepository().GetSchemaByID(context.Background(), db, schemaID)
+		require.NoError(t, err)
+		assert.Positive(t, stored.ArchivedAt)
+
+		activeSchemas, err := schemas.NewProjectionRepository().GetSchemas(context.Background(), db)
+		require.NoError(t, err)
+		assert.Empty(t, activeSchemas)
+
+		archivedSchemas, err := schemas.NewProjectionRepository().GetArchivedSchemas(context.Background(), db)
+		require.NoError(t, err)
+		require.Len(t, archivedSchemas, 1)
+		assert.Equal(t, schemaID, archivedSchemas[0].ID)
+	})
+
+	t.Run("fails when schema does not exist", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		missing, err := schemas.ParseID("schema_01ARZ3NDEKTSV4RRFFQ69G5FAX")
+		require.NoError(t, err)
+
+		err = svc.ArchiveSchema(context.Background(), missing)
+		require.ErrorContains(t, err, "schema does not exist")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 0)
+	})
+
+	t.Run("fails when schema is already archived", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.ArchiveSchema(context.Background(), schemaID))
+		err = svc.ArchiveSchema(context.Background(), schemaID)
+		require.ErrorContains(t, err, "schema is already archived")
+
+		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, streamErr)
+		assert.Len(t, eventsInStream, 2)
+	})
 }
 
 func TestSynapse_UpdateNode(t *testing.T) {
