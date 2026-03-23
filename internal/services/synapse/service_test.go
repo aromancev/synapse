@@ -215,6 +215,46 @@ func TestSynapse_UpdateNode(t *testing.T) {
 	})
 }
 
+func TestSynapse_UpdateNodeKeywords(t *testing.T) {
+	t.Run("appends node keywords updated event and projections replace keywords", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.UpdateNodeKeywords(context.Background(), nodeID, []string{"  Math  ", "history", "math"}))
+
+		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, eventsInStream, 3)
+
+		e := eventsInStream[2]
+		assert.Equal(t, nodes.EventTypeNodeKeywordsUpdated, e.EventType)
+		assert.Equal(t, int64(2), e.StreamVersion)
+
+		var payload map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(e.Payload, &payload))
+		assert.JSONEq(t, `["math","history"]`, string(payload["keywords"]))
+
+		require.NoError(t, svc.RunProjection(context.Background(), nodes.NewProjection()))
+		stored, err := nodes.NewProjectionRepository().GetNodeByID(context.Background(), db, nodeID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"math", "history"}, stored.Keywords)
+		assert.Equal(t, "name Ada math history", stored.SearchText)
+	})
+}
+
 func TestSynapse_ArchiveNode(t *testing.T) {
 	t.Run("appends node archived event and projections mark stored node as archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)

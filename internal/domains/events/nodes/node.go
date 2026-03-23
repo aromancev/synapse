@@ -88,6 +88,7 @@ type Node struct {
 	CreatedAt  int64           `json:"created_at"`
 	ArchivedAt int64           `json:"archived_at"`
 	Payload    json.RawMessage `json:"payload"`
+	Keywords   []string        `json:"keywords"`
 	SearchText string          `json:"search_text"`
 }
 
@@ -101,9 +102,10 @@ func (n Node) Normalized() Node {
 		n.Payload = json.RawMessage(compact.Bytes())
 	}
 
+	n.Keywords = NormalizeKeywords(n.Keywords)
 	n.SearchText = strings.Join(strings.Fields(strings.TrimSpace(n.SearchText)), " ")
 	if n.SearchText == "" && len(n.Payload) > 0 {
-		n.SearchText = BuildSearchText(n.Payload)
+		n.SearchText = BuildSearchText(n.Payload, n.Keywords)
 	}
 
 	return n
@@ -151,5 +153,41 @@ func (n Node) Validate() []error {
 		}
 	}
 
+	if len(n.Keywords) > 64 {
+		errs = append(errs, errors.New("keywords must not exceed 64 items"))
+	}
+	for _, keyword := range n.Keywords {
+		if keyword == "" {
+			errs = append(errs, errors.New("keywords must not contain empty values"))
+			continue
+		}
+		if len(keyword) > 64 {
+			errs = append(errs, errors.New("keyword must not exceed 64 characters"))
+		}
+	}
+
 	return errs
+}
+
+func NormalizeKeywords(keywords []string) []string {
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(keywords))
+	out := make([]string, 0, len(keywords))
+	for _, keyword := range keywords {
+		keyword = strings.ToLower(strings.TrimSpace(keyword))
+		keyword = strings.Join(strings.Fields(keyword), " ")
+		if keyword == "" {
+			continue
+		}
+		if _, ok := seen[keyword]; ok {
+			continue
+		}
+		seen[keyword] = struct{}{}
+		out = append(out, keyword)
+	}
+
+	return out
 }

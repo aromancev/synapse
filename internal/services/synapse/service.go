@@ -169,6 +169,38 @@ func (s *Synapse) UpdateNode(ctx context.Context, nodeID nodes.ID, payloadJSON j
 	return nil
 }
 
+func (s *Synapse) UpdateNodeKeywords(ctx context.Context, nodeID nodes.ID, keywords []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	eventsRepo := events.NewRepository()
+	aggregate, err := loadExistingNodeAggregate(ctx, eventsRepo, tx, nodeID)
+	if err != nil {
+		return err
+	}
+	stream, err := loadStream(ctx, eventsRepo, tx, nodeID.StreamID(), nodes.StreamTypeNode)
+	if err != nil {
+		return fmt.Errorf("load node stream: %w", err)
+	}
+
+	if err := aggregate.UpdateKeywords(ctx, stream, keywords); err != nil {
+		return fmt.Errorf("aggregate update node keywords: %w", err)
+	}
+
+	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
+		return fmt.Errorf("append node events: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Synapse) ArchiveNode(ctx context.Context, nodeID nodes.ID) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

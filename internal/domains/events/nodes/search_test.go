@@ -18,6 +18,10 @@ func TestBuildSearchText(t *testing.T) {
 			"ignored": null
 		}`)
 
-		assert.Equal(t, "meta source book notes name Ada Lovelace summary analytical engine pioneer tags math history", BuildSearchText(payload))
+		assert.Equal(t, "meta source book notes name Ada Lovelace summary analytical engine pioneer tags math history", BuildSearchText(payload, nil))
+	})
+
+	t.Run("includes normalized keywords", func(t *testing.T) {
+		assert.Equal(t, "name Ada math history", BuildSearchText(json.RawMessage(`{"name":"Ada"}`), []string{"  Math  ", "history", "math"}))
 	})
 }
