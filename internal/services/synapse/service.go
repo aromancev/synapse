@@ -31,63 +31,63 @@ func NewSynapse(db *sql.DB, replicator replicators.Replicator) *Synapse {
 	return &Synapse{db: db, replicator: replicator}
 }
 
-func (s *Synapse) AddSchema(ctx context.Context, name string, schemaJSON json.RawMessage) error {
+func (s *Synapse) AddSchema(ctx context.Context, name string, schemaJSON json.RawMessage) (schemas.ID, error) {
 	schemaID, err := schemas.NewID()
 	if err != nil {
-		return fmt.Errorf("new schema id: %w", err)
+		return schemas.ID{}, fmt.Errorf("new schema id: %w", err)
 	}
 
 	schema := schemas.Schema{ID: schemaID, Name: name, Schema: schemaJSON}.Normalized()
 	if validationErrors := schema.Validate(); len(validationErrors) > 0 {
-		return errors.Join(validationErrors...)
+		return schemas.ID{}, errors.Join(validationErrors...)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return schemas.ID{}, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	eventsRepo := events.NewRepository()
 	stream, err := loadStream(ctx, eventsRepo, tx, schema.ID.StreamID(), schemas.StreamTypeSchema)
 	if err != nil {
-		return fmt.Errorf("load schema stream: %w", err)
+		return schemas.ID{}, fmt.Errorf("load schema stream: %w", err)
 	}
 
 	aggregate := &schemas.Aggregate{}
 	if err := replayAggregate(ctx, aggregate, stream); err != nil {
-		return fmt.Errorf("replay schema aggregate: %w", err)
+		return schemas.ID{}, fmt.Errorf("replay schema aggregate: %w", err)
 	}
 
 	if err := aggregate.Create(ctx, stream, schema.ID, schema.Name, schema.Schema); err != nil {
-		return fmt.Errorf("aggregate create schema: %w", err)
+		return schemas.ID{}, fmt.Errorf("aggregate create schema: %w", err)
 	}
 
 	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
-		return fmt.Errorf("append schema events: %w", err)
+		return schemas.ID{}, fmt.Errorf("append schema events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return schemas.ID{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return nil
+	return schema.ID, nil
 }
 
-func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON json.RawMessage) error {
+func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON json.RawMessage) (nodes.ID, error) {
 	nodeID, err := nodes.NewID()
 	if err != nil {
-		return fmt.Errorf("new node id: %w", err)
+		return nodes.ID{}, fmt.Errorf("new node id: %w", err)
 	}
 
 	node := nodes.Node{ID: nodeID, SchemaID: schemaID.StreamID(), CreatedAt: nowUnix(), Payload: payloadJSON}.Normalized()
 	if validationErrors := node.Validate(); len(validationErrors) > 0 {
-		return errors.Join(validationErrors...)
+		return nodes.ID{}, errors.Join(validationErrors...)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return nodes.ID{}, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -95,37 +95,37 @@ func (s *Synapse) AddNode(ctx context.Context, schemaID schemas.ID, payloadJSON 
 
 	schemaAggregate, err := loadSchemaAggregate(ctx, eventsRepo, tx, schemaID)
 	if err != nil {
-		return err
+		return nodes.ID{}, err
 	}
 	if schemaAggregate.Archived() {
-		return errors.New("schema is archived")
+		return nodes.ID{}, errors.New("schema is archived")
 	}
 	if err := schemaAggregate.Validate(ctx, node.Payload); err != nil {
-		return fmt.Errorf("validate node payload against schema: %w", err)
+		return nodes.ID{}, fmt.Errorf("validate node payload against schema: %w", err)
 	}
 
 	stream, err := loadStream(ctx, eventsRepo, tx, node.ID.StreamID(), nodes.StreamTypeNode)
 	if err != nil {
-		return fmt.Errorf("load node stream: %w", err)
+		return nodes.ID{}, fmt.Errorf("load node stream: %w", err)
 	}
 	aggregate := &nodes.Aggregate{}
 	if err := replayAggregate(ctx, aggregate, stream); err != nil {
-		return fmt.Errorf("replay node aggregate: %w", err)
+		return nodes.ID{}, fmt.Errorf("replay node aggregate: %w", err)
 	}
 
 	if err := aggregate.Create(ctx, stream, node.Payload, node.ID, node.SchemaID); err != nil {
-		return fmt.Errorf("aggregate create node: %w", err)
+		return nodes.ID{}, fmt.Errorf("aggregate create node: %w", err)
 	}
 
 	if err := appendRecordedEvents(ctx, eventsRepo, tx, stream); err != nil {
-		return fmt.Errorf("append node events: %w", err)
+		return nodes.ID{}, fmt.Errorf("append node events: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return nodes.ID{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return nil
+	return node.ID, nil
 }
 
 func (s *Synapse) UpdateNode(ctx context.Context, nodeID nodes.ID, payloadJSON json.RawMessage) error {
@@ -304,6 +304,26 @@ func (s *Synapse) GetArchivedSchemas(ctx context.Context) ([]schemas.Schema, err
 	}
 
 	return storedSchemas, nil
+}
+
+func (s *Synapse) GetNodesBySchemaID(ctx context.Context, schemaID schemas.ID, limit int) ([]nodes.Node, error) {
+	nodesRepo := nodes.NewProjectionRepository()
+	storedNodes, err := nodesRepo.GetNodesBySchemaID(ctx, s.db, schemaID.StreamID(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("get nodes by schema id: %w", err)
+	}
+
+	return storedNodes, nil
+}
+
+func (s *Synapse) GetArchivedNodesBySchemaID(ctx context.Context, schemaID schemas.ID, limit int) ([]nodes.Node, error) {
+	nodesRepo := nodes.NewProjectionRepository()
+	storedNodes, err := nodesRepo.GetArchivedNodesBySchemaID(ctx, s.db, schemaID.StreamID(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("get archived nodes by schema id: %w", err)
+	}
+
+	return storedNodes, nil
 }
 
 func (s *Synapse) SearchNodes(ctx context.Context, query string, limit int) ([]nodes.ID, error) {
