@@ -1,24 +1,18 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
 	"github.com/spf13/cobra"
 )
 
-var addSchemaName string
-
-var schemasAddCmd = &cobra.Command{
-	Use:   "add --name <name> [json-payload]",
-	Short: "Add a JSON schema",
-	Args:  cobra.MaximumNArgs(1),
+var schemasArchiveCmd = &cobra.Command{
+	Use:   "archive <schema-id>",
+	Short: "Archive a schema",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if addSchemaName == "" {
-			return fmt.Errorf("--name is required")
-		}
-		schemaJSON, err := readJSONPayload(args)
+		schemaID, err := schemas.ParseID(args[0])
 		if err != nil {
 			return err
 		}
@@ -29,8 +23,7 @@ var schemasAddCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		schemaID, err := service.AddSchema(cmd.Context(), addSchemaName, json.RawMessage(schemaJSON))
-		if err != nil {
+		if err := service.ArchiveSchema(cmd.Context(), schemaID); err != nil {
 			return err
 		}
 		if err := service.RunReplication(cmd.Context()); err != nil {
@@ -46,6 +39,5 @@ var schemasAddCmd = &cobra.Command{
 }
 
 func init() {
-	schemasAddCmd.Flags().StringVar(&addSchemaName, "name", "", "schema name")
-	schemasCmd.AddCommand(schemasAddCmd)
+	schemasCmd.AddCommand(schemasArchiveCmd)
 }

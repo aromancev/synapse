@@ -41,7 +41,7 @@ func TestSynapse_AddSchema(t *testing.T) {
 	t.Run("normalizes validates and appends schema event", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		err := svc.AddSchema(context.Background(), "  person  ", json.RawMessage(" { \"type\": \"object\" } "))
+		_, err := svc.AddSchema(context.Background(), "  person  ", json.RawMessage(" { \"type\": \"object\" } "))
 		require.NoError(t, err)
 
 		eventsInStream, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -67,7 +67,8 @@ func TestSynapse_AddNode(t *testing.T) {
 	t.Run("normalizes validates and appends node event", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
@@ -75,7 +76,7 @@ func TestSynapse_AddNode(t *testing.T) {
 		require.NoError(t, err)
 
 		before := time.Now().Unix()
-		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(" { \"name\": \"Ada\" } "))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(" { \"name\": \"Ada\" } "))
 		after := time.Now().Unix()
 		require.NoError(t, err)
 
@@ -102,14 +103,15 @@ func TestSynapse_AddNode(t *testing.T) {
 	t.Run("fails when payload does not match schema", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"age":42}`))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"age":42}`))
 		require.Error(t, err)
 
 		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -120,7 +122,8 @@ func TestSynapse_AddNode(t *testing.T) {
 	t.Run("fails when schema is archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
@@ -128,7 +131,8 @@ func TestSynapse_AddNode(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, svc.ArchiveSchema(context.Background(), schemaID))
-		err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
 		require.ErrorContains(t, err, "schema is archived")
 
 		eventsInStream, streamErr := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -141,8 +145,10 @@ func TestSynapse_GetSchemas(t *testing.T) {
 	t.Run("returns live and archived schemas through separate service methods", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
-		require.NoError(t, svc.AddSchema(context.Background(), "company", json.RawMessage(`{"type":"object"}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`))
+		require.NoError(t, err)
+		_, err = svc.AddSchema(context.Background(), "company", json.RawMessage(`{"type":"object"}`))
+		require.NoError(t, err)
 
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
@@ -176,7 +182,8 @@ func TestSynapse_ArchiveSchema(t *testing.T) {
 	t.Run("appends schema archived event and projections mark stored schema as archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
@@ -234,7 +241,8 @@ func TestSynapse_ArchiveSchema(t *testing.T) {
 
 	t.Run("fails when schema is already archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
@@ -242,6 +250,7 @@ func TestSynapse_ArchiveSchema(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, svc.ArchiveSchema(context.Background(), schemaID))
+		require.NoError(t, err)
 		err = svc.ArchiveSchema(context.Background(), schemaID)
 		require.ErrorContains(t, err, "schema is already archived")
 
@@ -255,14 +264,16 @@ func TestSynapse_UpdateNode(t *testing.T) {
 	t.Run("appends node updated event and projections replace payload", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"active":{"type":"boolean"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"active":{"type":"boolean"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 2)
@@ -299,14 +310,16 @@ func TestSynapse_UpdateNode(t *testing.T) {
 	t.Run("fails when updated payload does not match schema", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 2)
@@ -324,14 +337,16 @@ func TestSynapse_UpdateNode(t *testing.T) {
 	t.Run("fails when node is archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 2)
@@ -352,14 +367,16 @@ func TestSynapse_UpdateNodeKeywords(t *testing.T) {
 	t.Run("appends node keywords updated event and projections replace keywords", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 2)
@@ -392,14 +409,16 @@ func TestSynapse_ArchiveNode(t *testing.T) {
 	t.Run("appends node archived event and projections mark stored node as archived", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 2)
@@ -597,15 +616,18 @@ func TestSynapse_SearchNodes(t *testing.T) {
 	t.Run("returns active nodes in fts rank order", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"summary":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"summary":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
 		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
 		require.NoError(t, err)
 
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada Lovelace","summary":"analytical engine pioneer"}`)))
-		require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace Hopper","summary":"compiler pioneer"}`)))
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada Lovelace","summary":"analytical engine pioneer"}`))
+		require.NoError(t, err)
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace Hopper","summary":"compiler pioneer"}`))
+		require.NoError(t, err)
 		require.NoError(t, svc.RunProjections(context.Background()))
 
 		results, err := svc.SearchNodes(context.Background(), "analytical", 10)
@@ -631,7 +653,8 @@ func TestSynapse_GetLinkedNodes(t *testing.T) {
 	t.Run("walks the graph bidirectionally with depth breadth and archive filtering", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
 
-		require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
 		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 		require.NoError(t, err)
 		require.Len(t, seedEvents, 1)
@@ -639,7 +662,8 @@ func TestSynapse_GetLinkedNodes(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, name := range []string{"Ada", "Grace", "Linus", "Margaret", "Archived"} {
-			require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(fmt.Sprintf(`{"name":%q}`, name))))
+			_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(fmt.Sprintf(`{"name":%q}`, name)))
+			require.NoError(t, err)
 		}
 
 		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
@@ -815,9 +839,10 @@ func TestSynapse_Restore(t *testing.T) {
 		require.NoError(t, sourceSvc.RunReplication(context.Background()))
 
 		targetSvc, _, _ := newTestService(t, replicators.NewFile("events_jsonl", path))
-		require.NoError(t, targetSvc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`)))
+		_, err := targetSvc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object"}`))
+		require.NoError(t, err)
 
-		err := targetSvc.Restore(context.Background())
+		err = targetSvc.Restore(context.Background())
 		require.ErrorContains(t, err, "event store must be empty")
 	})
 
@@ -839,15 +864,18 @@ func mustReadReplicatedEvent(t *testing.T, line string) events.Event {
 func seedTwoNodes(t *testing.T, svc *Synapse, eventsRepo *events.Repository, db *sql.DB) (schemaID schemas.ID, fromID, toID nodes.ID) {
 	t.Helper()
 
-	require.NoError(t, svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)))
+	_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+	require.NoError(t, err)
 	seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 	require.NoError(t, err)
 	require.Len(t, seedEvents, 1)
 	schemaID, err = schemas.ParseID(seedEvents[0].StreamID.String())
 	require.NoError(t, err)
 
-	require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`)))
-	require.NoError(t, svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace"}`)))
+	_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+	require.NoError(t, err)
+	_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Grace"}`))
+	require.NoError(t, err)
 
 	seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
 	require.NoError(t, err)
