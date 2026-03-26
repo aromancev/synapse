@@ -316,6 +316,16 @@ func (s *Synapse) GetNodesBySchemaID(ctx context.Context, schemaID schemas.ID, l
 	return storedNodes, nil
 }
 
+func (s *Synapse) GetNodeKeywords(ctx context.Context, nodeID nodes.ID) ([]string, error) {
+	nodesRepo := nodes.NewProjectionRepository()
+	storedNode, err := nodesRepo.GetNodeByID(ctx, s.db, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("get node keywords: %w", err)
+	}
+
+	return storedNode.Keywords, nil
+}
+
 func (s *Synapse) GetArchivedNodesBySchemaID(ctx context.Context, schemaID schemas.ID, limit int) ([]nodes.Node, error) {
 	nodesRepo := nodes.NewProjectionRepository()
 	storedNodes, err := nodesRepo.GetArchivedNodesBySchemaID(ctx, s.db, schemaID.StreamID(), limit)
