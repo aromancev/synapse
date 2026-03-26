@@ -12,6 +12,10 @@ import (
 //go:embed schema.json
 var configSchemaJSON string
 
+func Schema() string {
+	return configSchemaJSON
+}
+
 const (
 	DefaultLogPath            = ".synapse/log.jsonl"
 	DefaultReplicatorFilePath = ".synapse/replica.jsonl"
