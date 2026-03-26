@@ -363,6 +363,35 @@ func TestSynapse_UpdateNode(t *testing.T) {
 	})
 }
 
+func TestSynapse_GetNodeKeywords(t *testing.T) {
+	t.Run("returns normalized node keywords from projections", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		_, err = svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
+		seedEvents, err = eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 2)
+		nodeID, err := nodes.ParseID(seedEvents[1].StreamID.String())
+		require.NoError(t, err)
+
+		require.NoError(t, svc.UpdateNodeKeywords(context.Background(), nodeID, []string{"  Math  ", "history", "math"}))
+		require.NoError(t, svc.RunProjection(context.Background(), nodes.NewProjection()))
+
+		keywords, err := svc.GetNodeKeywords(context.Background(), nodeID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"math", "history"}, keywords)
+	})
+}
+
 func TestSynapse_UpdateNodeKeywords(t *testing.T) {
 	t.Run("appends node keywords updated event and projections replace keywords", func(t *testing.T) {
 		svc, eventsRepo, db := newTestService(t, nil)
