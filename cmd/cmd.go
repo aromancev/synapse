@@ -6,20 +6,35 @@ import (
 	"io"
 	"os"
 
+	"github.com/aromancev/synapse/internal/config"
+	"github.com/aromancev/synapse/internal/domains/events/replicators"
 	"github.com/aromancev/synapse/internal/services/synapse"
 )
 
-func openSynapse() (*synapse.Synapse, func() error, error) {
+func openSynapse() (*synapse.Synapse, config.Config, func() error, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, config.Config{}, nil, err
+	}
+
+	repo := config.NewRepository(db)
+	cfg, err := repo.Get(rootCmd.Context())
+	if err != nil {
+		_ = db.Close()
+		return nil, config.Config{}, nil, err
+	}
+
+	rep, err := replicators.NewFromConfig(cfg)
+	if err != nil {
+		_ = db.Close()
+		return nil, config.Config{}, nil, err
 	}
 
 	cleanup := func() error {
 		return db.Close()
 	}
 
-	return synapse.NewSynapse(db, nil), cleanup, nil
+	return synapse.NewSynapse(db, rep), cfg, cleanup, nil
 }
 
 func writeJSON(v any) error {

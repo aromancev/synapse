@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/aromancev/synapse/internal/domains/events/schemas"
+	"github.com/aromancev/synapse/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -22,8 +22,7 @@ var schemasAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		service, cleanup, err := openSynapse()
+		service, cfg, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}
@@ -33,10 +32,12 @@ var schemasAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := service.RunReplication(cmd.Context()); err != nil {
-			return err
+		if cfg.Replication.Mode == config.ReplicationModeAuto {
+			if err := service.RunReplication(cmd.Context()); err != nil {
+				return err
+			}
 		}
-		if err := service.RunProjection(cmd.Context(), schemas.NewProjection()); err != nil {
+		if err := service.RunProjections(cmd.Context()); err != nil {
 			return err
 		}
 
