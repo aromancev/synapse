@@ -3,13 +3,14 @@ package cmd
 import (
 	"encoding/json"
 
+	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
 )
 
-var nodesKeywordsSetCmd = &cobra.Command{
-	Use:   "set <node-id> [json-keywords]",
-	Short: "Set node keywords",
+var nodesKeywordsUpdateCmd = &cobra.Command{
+	Use:   "update <node-id> [json-keywords]",
+	Short: "Update node keywords",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nodeID, err := nodes.ParseID(args[0])
@@ -26,8 +27,7 @@ var nodesKeywordsSetCmd = &cobra.Command{
 		if err := json.Unmarshal([]byte(payloadJSON), &keywords); err != nil {
 			return err
 		}
-
-		service, cleanup, err := openSynapse()
+		service, cfg, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}
@@ -36,10 +36,12 @@ var nodesKeywordsSetCmd = &cobra.Command{
 		if err := service.UpdateNodeKeywords(cmd.Context(), nodeID, keywords); err != nil {
 			return err
 		}
-		if err := service.RunReplication(cmd.Context()); err != nil {
-			return err
+		if cfg.Replication.Mode == config.ReplicationModeAuto {
+			if err := service.RunReplication(cmd.Context()); err != nil {
+				return err
+			}
 		}
-		if err := service.RunProjection(cmd.Context(), nodes.NewProjection()); err != nil {
+		if err := service.RunProjections(cmd.Context()); err != nil {
 			return err
 		}
 
@@ -48,5 +50,5 @@ var nodesKeywordsSetCmd = &cobra.Command{
 }
 
 func init() {
-	nodesKeywordsCmd.AddCommand(nodesKeywordsSetCmd)
+	nodesKeywordsCmd.AddCommand(nodesKeywordsUpdateCmd)
 }

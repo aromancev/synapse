@@ -24,7 +24,7 @@ var nodesListCmd = &cobra.Command{
 			return err
 		}
 
-		service, cleanup, err := openSynapse()
+		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}

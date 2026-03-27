@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 
+	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
 )
@@ -21,8 +22,7 @@ var nodesUpdateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		service, cleanup, err := openSynapse()
+		service, cfg, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}
@@ -31,10 +31,12 @@ var nodesUpdateCmd = &cobra.Command{
 		if err := service.UpdateNode(cmd.Context(), nodeID, json.RawMessage(payloadJSON)); err != nil {
 			return err
 		}
-		if err := service.RunReplication(cmd.Context()); err != nil {
-			return err
+		if cfg.Replication.Mode == config.ReplicationModeAuto {
+			if err := service.RunReplication(cmd.Context()); err != nil {
+				return err
+			}
 		}
-		if err := service.RunProjection(cmd.Context(), nodes.NewProjection()); err != nil {
+		if err := service.RunProjections(cmd.Context()); err != nil {
 			return err
 		}
 

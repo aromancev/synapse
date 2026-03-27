@@ -8,7 +8,7 @@ var schemasListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List schemas",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		service, cleanup, err := openSynapse()
+		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}

@@ -24,7 +24,7 @@ var graphGetCmd = &cobra.Command{
 			frontier = append(frontier, id)
 		}
 
-		service, cleanup, err := openSynapse()
+		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}

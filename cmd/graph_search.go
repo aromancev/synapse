@@ -17,7 +17,7 @@ var graphSearchCmd = &cobra.Command{
 	Short: "Search for seed nodes, then traverse the graph",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		service, cleanup, err := openSynapse()
+		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}

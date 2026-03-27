@@ -13,7 +13,7 @@ var nodesSearchCmd = &cobra.Command{
 	Short: "Search nodes and return matching node IDs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		service, cleanup, err := openSynapse()
+		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}

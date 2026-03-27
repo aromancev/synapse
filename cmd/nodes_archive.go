@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
 )
@@ -16,8 +17,7 @@ var nodesArchiveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		service, cleanup, err := openSynapse()
+		service, cfg, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}
@@ -26,10 +26,12 @@ var nodesArchiveCmd = &cobra.Command{
 		if err := service.ArchiveNode(cmd.Context(), nodeID); err != nil {
 			return err
 		}
-		if err := service.RunReplication(cmd.Context()); err != nil {
-			return err
+		if cfg.Replication.Mode == config.ReplicationModeAuto {
+			if err := service.RunReplication(cmd.Context()); err != nil {
+				return err
+			}
 		}
-		if err := service.RunProjection(cmd.Context(), nodes.NewProjection()); err != nil {
+		if err := service.RunProjections(cmd.Context()); err != nil {
 			return err
 		}
 

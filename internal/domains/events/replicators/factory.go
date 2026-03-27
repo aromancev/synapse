@@ -6,7 +6,7 @@ import (
 	"github.com/aromancev/synapse/internal/config"
 )
 
-func NewFromConfig(cfg config.Config) ([]Replicator, error) {
+func NewFromConfig(cfg config.Config) (Replicator, error) {
 	if cfg.Replication.Replicator == nil {
 		return nil, nil
 	}
@@ -18,7 +18,7 @@ func NewFromConfig(cfg config.Config) ([]Replicator, error) {
 		if err != nil {
 			return nil, err
 		}
-		return []Replicator{NewFile(replicator.Name, fileCfg.Path)}, nil
+		return NewFile(replicator.Name, fileCfg.Path), nil
 	default:
 		return nil, fmt.Errorf("unsupported replicator type %q", replicator.Type)
 	}
