@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -53,15 +54,16 @@ type schemaRecord struct {
 	ID         string          `json:"id"`
 	Name       string          `json:"name"`
 	Schema     json.RawMessage `json:"schema"`
-	ArchivedAt int64           `json:"archived_at"`
+	ArchivedAt string          `json:"archived_at,omitempty"`
 }
 
 type nodeRecord struct {
 	ID         string          `json:"id"`
 	SchemaID   string          `json:"schema_id"`
+	CreatedAt  string          `json:"created_at"`
 	Payload    json.RawMessage `json:"payload"`
 	Keywords   []string        `json:"keywords"`
-	ArchivedAt int64           `json:"archived_at"`
+	ArchivedAt string          `json:"archived_at,omitempty"`
 }
 
 type eventRecord struct {
@@ -71,7 +73,8 @@ type eventRecord struct {
 	StreamVersion  int64           `json:"stream_version"`
 	EventType      string          `json:"event_type"`
 	Payload        json.RawMessage `json:"payload"`
-	OccurredAt     int64           `json:"occurred_at"`
+	OccurredAt     string          `json:"occurred_at"`
+	RecordedAt     string          `json:"recorded_at"`
 	GlobalPosition int64           `json:"global_position"`
 }
 
@@ -253,6 +256,12 @@ func decodeJSON[T any](t *testing.T, raw string) T {
 	return v
 }
 
+func requireRFC3339(t *testing.T, value string) {
+	t.Helper()
+	_, err := time.Parse(time.RFC3339, value)
+	require.NoError(t, err, "expected RFC3339 timestamp, got %q", value)
+}
+
 func TestCLIEndToEnd(t *testing.T) {
 	t.Run("commands fail before init and config lifecycle works after init", func(t *testing.T) {
 		h := newCLIHarness(t)
@@ -321,6 +330,8 @@ func TestCLIEndToEnd(t *testing.T) {
 		nodes := h.listNodes("--schema-id", personSchemaID)
 		require.Len(t, nodes, 2)
 		require.Equal(t, personSchemaID, nodes[0].SchemaID)
+		requireRFC3339(t, nodes[0].CreatedAt)
+		require.Empty(t, nodes[0].ArchivedAt)
 
 		h.updateNode(adaID, `{"name":"Ada Lovelace","role":"engineer"}`)
 		h.updateNodeStdin(adaID, `{"name":"Ada Lovelace","role":"mathematician"}`)
@@ -335,7 +346,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		archivedNodes := h.listNodes("--schema-id", personSchemaID, "--archived")
 		require.Len(t, archivedNodes, 1)
 		require.Equal(t, adaID, archivedNodes[0].ID)
-		require.NotZero(t, archivedNodes[0].ArchivedAt)
+		requireRFC3339(t, archivedNodes[0].ArchivedAt)
 
 		h.run("schemas", "archive", companySchemaID)
 		liveSchemas := h.listSchemas()
@@ -344,7 +355,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		archivedSchemas := h.listSchemas("--archived")
 		require.Len(t, archivedSchemas, 1)
 		require.Equal(t, companySchemaID, archivedSchemas[0].ID)
-		require.NotZero(t, archivedSchemas[0].ArchivedAt)
+		requireRFC3339(t, archivedSchemas[0].ArchivedAt)
 	})
 
 	t.Run("node search and graph traversal through links", func(t *testing.T) {
@@ -400,6 +411,8 @@ func TestCLIEndToEnd(t *testing.T) {
 		require.Equal(t, int64(1), events[0].GlobalPosition)
 		require.Equal(t, int64(2), events[1].GlobalPosition)
 		require.Equal(t, int64(3), events[2].GlobalPosition)
+		requireRFC3339(t, events[0].OccurredAt)
+		requireRFC3339(t, events[0].RecordedAt)
 
 		fresh := newCLIHarness(t)
 		errText := fresh.runErr("replication", "restore")
