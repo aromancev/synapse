@@ -1,29 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "synapse-config.schema.json",
+  "description": "Configuration schema for Synapse runtime logging and replication settings.",
   "type": "object",
   "additionalProperties": false,
   "required": ["logging", "replication"],
   "properties": {
     "logging": {
+      "description": "Logging configuration for Synapse runtime diagnostics and event output.",
       "type": "object",
       "additionalProperties": false,
       "required": ["logger"],
       "properties": {
         "logger": {
+          "description": "Logger backend selection and backend-specific configuration.",
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "config"],
           "properties": {
             "type": {
+              "description": "Logger backend type. Currently only file logging is supported.",
               "const": "file"
             },
             "config": {
+              "description": "Configuration for the selected logger backend.",
               "type": "object",
               "additionalProperties": false,
               "required": ["path"],
               "properties": {
                 "path": {
+                  "description": "Filesystem path where Synapse should write its log output.",
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096,
@@ -36,33 +42,40 @@
       }
     },
     "replication": {
+      "description": "Replication configuration controlling whether and how Synapse syncs event data to external storage.",
       "type": "object",
       "additionalProperties": false,
       "required": ["mode", "replicator"],
       "properties": {
         "mode": {
+          "description": "Replication execution mode: disabled turns replication off, auto runs replication automatically, and manual requires explicit replication commands.",
           "enum": ["disabled", "auto", "manual"]
         },
         "replicator": {
+          "description": "Replicator definition used when replication is configured. May be null when replication is disabled.",
           "type": ["object", "null"],
           "additionalProperties": false,
           "required": ["name", "type", "config"],
           "properties": {
             "name": {
+              "description": "Stable replicator name used to identify this replication target in config and runtime output.",
               "type": "string",
               "minLength": 1,
               "maxLength": 64,
               "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
             },
             "type": {
+              "description": "Replicator backend type. Currently only file-based replication is supported.",
               "const": "file"
             },
             "config": {
+              "description": "Configuration for the selected replicator backend.",
               "type": "object",
               "additionalProperties": false,
               "required": ["path"],
               "properties": {
                 "path": {
+                  "description": "Filesystem path where the file replicator stores replicated event data.",
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096,
