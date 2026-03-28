@@ -152,12 +152,12 @@ func TestRepository(t *testing.T) {
 		id, err := NewID()
 		require.NoError(t, err)
 
-		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: id, SchemaID: events.StreamID("schema_01HXYZ"), CreatedAt: 1700000000, Payload: json.RawMessage(`{"name":"Ada"}`), Keywords: []string{"  Math  ", "history", "math"}}))
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: id, SchemaID: events.StreamID("schema_01HXYZ"), CreatedAt: 1700000000, Payload: json.RawMessage(`{"name":"Ada"}`), Keywords: []string{"  Math  ", "history science", "math"}}))
 
 		node, err := repo.GetNodeByID(ctx, db, id)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"math", "history"}, node.Keywords)
-		assert.Equal(t, "name Ada math history", node.SearchText)
+		assert.Equal(t, []string{"math", "history", "science"}, node.Keywords)
+		assert.Equal(t, "name Ada math history science", node.SearchText)
 	})
 
 	t.Run("SearchNodeIDs returns active matches from fts", func(t *testing.T) {

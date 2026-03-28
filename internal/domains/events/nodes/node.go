@@ -177,16 +177,16 @@ func NormalizeKeywords(keywords []string) []string {
 	seen := make(map[string]struct{}, len(keywords))
 	out := make([]string, 0, len(keywords))
 	for _, keyword := range keywords {
-		keyword = strings.ToLower(strings.TrimSpace(keyword))
-		keyword = strings.Join(strings.Fields(keyword), " ")
-		if keyword == "" {
-			continue
+		for _, token := range strings.Fields(strings.ToLower(strings.TrimSpace(keyword))) {
+			if token == "" {
+				continue
+			}
+			if _, ok := seen[token]; ok {
+				continue
+			}
+			seen[token] = struct{}{}
+			out = append(out, token)
 		}
-		if _, ok := seen[keyword]; ok {
-			continue
-		}
-		seen[keyword] = struct{}{}
-		out = append(out, keyword)
 	}
 
 	return out

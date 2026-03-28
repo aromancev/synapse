@@ -96,7 +96,7 @@ func TestAggregate_UpdateKeywords(t *testing.T) {
 		require.NoError(t, aggregate.Create(context.Background(), stream, json.RawMessage(`{"name":"Ada"}`), id, events.StreamID("schema_01HXYZ")))
 		require.NoError(t, replayAggregate(t, aggregate, stream.RecordedEvents()[:1]))
 
-		err = aggregate.UpdateKeywords(context.Background(), stream, []string{"  Math  ", "history", "math"})
+		err = aggregate.UpdateKeywords(context.Background(), stream, []string{"  Math  ", "history science", "math"})
 		require.NoError(t, err)
 
 		recorded := stream.RecordedEvents()
@@ -105,7 +105,7 @@ func TestAggregate_UpdateKeywords(t *testing.T) {
 
 		var payload map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(recorded[1].Payload, &payload))
-		assert.JSONEq(t, `["math","history"]`, string(payload["keywords"]))
+		assert.JSONEq(t, `["math","history","science"]`, string(payload["keywords"]))
 	})
 }
 
