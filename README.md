@@ -191,13 +191,13 @@ Typical `nodes list` output looks like this:
   {
     "id": "node_...",
     "schema_id": "schema_...",
+    "created_at": "2026-03-28T15:48:00Z",
     "payload": {
       "title": "Write README",
       "status": "todo",
       "due": "2026-03-29"
     },
-    "keywords": ["docs", "readme", "writing"],
-    "archived_at": 0
+    "keywords": ["docs", "readme", "writing"]
   }
 ]
 ```
@@ -547,8 +547,8 @@ Each event has:
 - `stream_version`
 - `event_type`
 - `event_version`
-- `occurred_at`
-- `recorded_at`
+- `occurred_at` (UTC RFC3339 in external JSON; Unix seconds in storage)
+- `recorded_at` (UTC RFC3339 in external JSON; Unix seconds in storage)
 - `payload`
 - `meta`
 - `global_position`

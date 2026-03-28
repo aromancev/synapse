@@ -13,6 +13,10 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+func FormatUnixTimestamp(unix int64) string {
+	return time.Unix(unix, 0).UTC().Format(time.RFC3339)
+}
+
 const eventIDPrefix = "event_"
 
 var (
@@ -137,9 +141,58 @@ func (t EventType) Validate() error {
 type Request struct {
 	EventType    EventType `json:"event_type"`
 	EventVersion int64     `json:"event_version"`
-	OccurredAt   int64     `json:"occurred_at"`
+	OccurredAt   int64     `json:"-"`
 	Payload      any       `json:"payload"`
 	Meta         any       `json:"meta"`
+}
+
+func (r Request) MarshalJSON() ([]byte, error) {
+	type requestJSON struct {
+		EventType    EventType `json:"event_type"`
+		EventVersion int64     `json:"event_version"`
+		OccurredAt   string    `json:"occurred_at"`
+		Payload      any       `json:"payload"`
+		Meta         any       `json:"meta"`
+	}
+
+	return json.Marshal(requestJSON{
+		EventType:    r.EventType,
+		EventVersion: r.EventVersion,
+		OccurredAt:   FormatUnixTimestamp(r.OccurredAt),
+		Payload:      r.Payload,
+		Meta:         r.Meta,
+	})
+}
+
+func (r *Request) UnmarshalJSON(data []byte) error {
+	type requestJSON struct {
+		EventType    EventType       `json:"event_type"`
+		EventVersion int64           `json:"event_version"`
+		OccurredAt   string          `json:"occurred_at"`
+		Payload      json.RawMessage `json:"payload"`
+		Meta         json.RawMessage `json:"meta"`
+	}
+
+	var aux requestJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	occurredAt, err := time.Parse(time.RFC3339, aux.OccurredAt)
+	if err != nil {
+		return fmt.Errorf("parse occurred_at: %w", err)
+	}
+
+	r.EventType = aux.EventType
+	r.EventVersion = aux.EventVersion
+	r.OccurredAt = occurredAt.UTC().Unix()
+	if len(aux.Payload) > 0 {
+		r.Payload = aux.Payload
+	}
+	if len(aux.Meta) > 0 {
+		r.Meta = aux.Meta
+	}
+	return nil
 }
 
 // Validate checks whether Request is valid.
@@ -168,10 +221,83 @@ type Event struct {
 	StreamVersion  int64           `json:"stream_version"`
 	EventType      EventType       `json:"event_type"`
 	EventVersion   int64           `json:"event_version"`
-	OccurredAt     int64           `json:"occurred_at"`
-	RecordedAt     int64           `json:"recorded_at"`
+	OccurredAt     int64           `json:"-"`
+	RecordedAt     int64           `json:"-"`
 	Payload        json.RawMessage `json:"payload"`
 	Meta           json.RawMessage `json:"meta"`
+}
+
+func (e Event) MarshalJSON() ([]byte, error) {
+	type eventJSON struct {
+		GlobalPosition int64           `json:"global_position"`
+		ID             EventID         `json:"id"`
+		StreamID       StreamID        `json:"stream_id"`
+		StreamType     StreamType      `json:"stream_type"`
+		StreamVersion  int64           `json:"stream_version"`
+		EventType      EventType       `json:"event_type"`
+		EventVersion   int64           `json:"event_version"`
+		OccurredAt     string          `json:"occurred_at"`
+		RecordedAt     string          `json:"recorded_at"`
+		Payload        json.RawMessage `json:"payload"`
+		Meta           json.RawMessage `json:"meta"`
+	}
+
+	return json.Marshal(eventJSON{
+		GlobalPosition: e.GlobalPosition,
+		ID:             e.ID,
+		StreamID:       e.StreamID,
+		StreamType:     e.StreamType,
+		StreamVersion:  e.StreamVersion,
+		EventType:      e.EventType,
+		EventVersion:   e.EventVersion,
+		OccurredAt:     FormatUnixTimestamp(e.OccurredAt),
+		RecordedAt:     FormatUnixTimestamp(e.RecordedAt),
+		Payload:        e.Payload,
+		Meta:           e.Meta,
+	})
+}
+
+func (e *Event) UnmarshalJSON(data []byte) error {
+	type eventJSON struct {
+		GlobalPosition int64           `json:"global_position"`
+		ID             EventID         `json:"id"`
+		StreamID       StreamID        `json:"stream_id"`
+		StreamType     StreamType      `json:"stream_type"`
+		StreamVersion  int64           `json:"stream_version"`
+		EventType      EventType       `json:"event_type"`
+		EventVersion   int64           `json:"event_version"`
+		OccurredAt     string          `json:"occurred_at"`
+		RecordedAt     string          `json:"recorded_at"`
+		Payload        json.RawMessage `json:"payload"`
+		Meta           json.RawMessage `json:"meta"`
+	}
+
+	var aux eventJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	occurredAt, err := time.Parse(time.RFC3339, aux.OccurredAt)
+	if err != nil {
+		return fmt.Errorf("parse occurred_at: %w", err)
+	}
+	recordedAt, err := time.Parse(time.RFC3339, aux.RecordedAt)
+	if err != nil {
+		return fmt.Errorf("parse recorded_at: %w", err)
+	}
+
+	e.GlobalPosition = aux.GlobalPosition
+	e.ID = aux.ID
+	e.StreamID = aux.StreamID
+	e.StreamType = aux.StreamType
+	e.StreamVersion = aux.StreamVersion
+	e.EventType = aux.EventType
+	e.EventVersion = aux.EventVersion
+	e.OccurredAt = occurredAt.UTC().Unix()
+	e.RecordedAt = recordedAt.UTC().Unix()
+	e.Payload = aux.Payload
+	e.Meta = aux.Meta
+	return nil
 }
 
 // Normalized returns a normalized copy of the event.

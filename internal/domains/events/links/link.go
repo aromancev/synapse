@@ -1,6 +1,7 @@
 package links
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +15,23 @@ type Link struct {
 	From      events.StreamID `json:"from"`
 	To        events.StreamID `json:"to"`
 	Weight    float64         `json:"weight"`
-	CreatedAt int64           `json:"created_at"`
+	CreatedAt int64           `json:"-"`
+}
+
+func (l Link) MarshalJSON() ([]byte, error) {
+	type linkJSON struct {
+		From      events.StreamID `json:"from"`
+		To        events.StreamID `json:"to"`
+		Weight    float64         `json:"weight"`
+		CreatedAt string          `json:"created_at"`
+	}
+
+	return json.Marshal(linkJSON{
+		From:      l.From,
+		To:        l.To,
+		Weight:    l.Weight,
+		CreatedAt: events.FormatUnixTimestamp(l.CreatedAt),
+	})
 }
 
 // Validate checks whether Link is valid.

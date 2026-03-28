@@ -85,11 +85,37 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 type Node struct {
 	ID         ID              `json:"id"`
 	SchemaID   events.StreamID `json:"schema_id"`
-	CreatedAt  int64           `json:"created_at"`
-	ArchivedAt int64           `json:"archived_at"`
+	CreatedAt  int64           `json:"-"`
+	ArchivedAt int64           `json:"-"`
 	Payload    json.RawMessage `json:"payload"`
 	Keywords   []string        `json:"keywords"`
 	SearchText string          `json:"search_text"`
+}
+
+func (n Node) MarshalJSON() ([]byte, error) {
+	type nodeJSON struct {
+		ID         ID              `json:"id"`
+		SchemaID   events.StreamID `json:"schema_id"`
+		CreatedAt  string          `json:"created_at"`
+		ArchivedAt *string         `json:"archived_at,omitempty"`
+		Payload    json.RawMessage `json:"payload"`
+		Keywords   []string        `json:"keywords"`
+		SearchText string          `json:"search_text"`
+	}
+
+	encoded := nodeJSON{
+		ID:         n.ID,
+		SchemaID:   n.SchemaID,
+		CreatedAt:  events.FormatUnixTimestamp(n.CreatedAt),
+		Payload:    n.Payload,
+		Keywords:   n.Keywords,
+		SearchText: n.SearchText,
+	}
+	if n.ArchivedAt > 0 {
+		archivedAt := events.FormatUnixTimestamp(n.ArchivedAt)
+		encoded.ArchivedAt = &archivedAt
+	}
+	return json.Marshal(encoded)
 }
 
 // Normalized returns a normalized copy of the node.

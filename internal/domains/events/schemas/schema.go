@@ -89,7 +89,27 @@ type Schema struct {
 	ID         ID              `json:"id"`
 	Name       string          `json:"name"`
 	Schema     json.RawMessage `json:"schema"`
-	ArchivedAt int64           `json:"archived_at"`
+	ArchivedAt int64           `json:"-"`
+}
+
+func (s Schema) MarshalJSON() ([]byte, error) {
+	type schemaJSON struct {
+		ID         ID              `json:"id"`
+		Name       string          `json:"name"`
+		Schema     json.RawMessage `json:"schema"`
+		ArchivedAt *string         `json:"archived_at,omitempty"`
+	}
+
+	encoded := schemaJSON{
+		ID:     s.ID,
+		Name:   s.Name,
+		Schema: s.Schema,
+	}
+	if s.ArchivedAt > 0 {
+		archivedAt := events.FormatUnixTimestamp(s.ArchivedAt)
+		encoded.ArchivedAt = &archivedAt
+	}
+	return json.Marshal(encoded)
 }
 
 // Normalized returns a normalized copy of the schema.
