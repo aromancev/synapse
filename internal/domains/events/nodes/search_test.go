@@ -22,6 +22,6 @@ func TestBuildSearchText(t *testing.T) {
 	})
 
 	t.Run("includes normalized keywords", func(t *testing.T) {
-		assert.Equal(t, "name Ada math history", BuildSearchText(json.RawMessage(`{"name":"Ada"}`), []string{"  Math  ", "history", "math"}))
+		assert.Equal(t, "name Ada math history science", BuildSearchText(json.RawMessage(`{"name":"Ada"}`), []string{"  Math  ", "history science", "math"}))
 	})
 }
