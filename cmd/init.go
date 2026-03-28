@@ -17,7 +17,7 @@ var initCmd = &cobra.Command{
 	Short: "Initialize synapse",
 	Long:  `Initializes the synapse memory system.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := openDB(dbPath)
+		db, err := openOrCreateDB(dbPath)
 		if err != nil {
 			return err
 		}
