@@ -156,22 +156,30 @@ func (h *cliHarness) getConfig() configDoc {
 
 func (h *cliHarness) addSchema(name string, schema string) string {
 	h.t.Helper()
-	return h.run("schemas", "add", "--name", name, schema).Stdout
+	out := h.run("schemas", "add", "--name", name, schema)
+	result := decodeJSON[map[string]any](h.t, out.Stdout)
+	return result["id"].(string)
 }
 
 func (h *cliHarness) addSchemaStdin(name string, schema string) string {
 	h.t.Helper()
-	return h.runWithStdin(schema, "schemas", "add", "--name", name).Stdout
+	out := h.runWithStdin(schema, "schemas", "add", "--name", name)
+	result := decodeJSON[map[string]any](h.t, out.Stdout)
+	return result["id"].(string)
 }
 
 func (h *cliHarness) addNode(schemaID string, payload string) string {
 	h.t.Helper()
-	return h.run("nodes", "add", "--schema-id", schemaID, payload).Stdout
+	out := h.run("nodes", "add", "--schema-id", schemaID, payload)
+	result := decodeJSON[map[string]any](h.t, out.Stdout)
+	return result["id"].(string)
 }
 
 func (h *cliHarness) addNodeStdin(schemaID string, payload string) string {
 	h.t.Helper()
-	return h.runWithStdin(payload, "nodes", "add", "--schema-id", schemaID).Stdout
+	out := h.runWithStdin(payload, "nodes", "add", "--schema-id", schemaID)
+	result := decodeJSON[map[string]any](h.t, out.Stdout)
+	return result["id"].(string)
 }
 
 func (h *cliHarness) updateNode(nodeID string, payload string) {
@@ -212,21 +220,28 @@ func (h *cliHarness) getKeywords(nodeID string) []string {
 	return decodeJSON[[]string](h.t, out.Stdout)
 }
 
-func (h *cliHarness) searchNodes(args ...string) []string {
+func (h *cliHarness) searchNodes(query string, args ...string) []string {
 	h.t.Helper()
-	out := h.run(append([]string{"nodes", "search"}, args...)...)
+	payload := fmt.Sprintf(`{"query":%q}`, query)
+	base := []string{"nodes", "search", payload}
+	out := h.run(append(base, args...)...)
 	return decodeJSON[[]string](h.t, out.Stdout)
 }
 
-func (h *cliHarness) graphGet(args ...string) []nodeRecord {
+func (h *cliHarness) graphGet(nodeIDs []string, args ...string) []nodeRecord {
 	h.t.Helper()
-	out := h.run(append([]string{"graph", "get"}, args...)...)
+	payload, err := json.Marshal(nodeIDs)
+	require.NoError(h.t, err)
+	base := []string{"graph", "get", string(payload)}
+	out := h.run(append(base, args...)...)
 	return decodeJSON[[]nodeRecord](h.t, out.Stdout)
 }
 
-func (h *cliHarness) graphSearch(args ...string) []nodeRecord {
+func (h *cliHarness) graphSearch(query string, args ...string) []nodeRecord {
 	h.t.Helper()
-	out := h.run(append([]string{"graph", "search"}, args...)...)
+	payload := fmt.Sprintf(`{"query":%q}`, query)
+	base := []string{"graph", "search", payload}
+	out := h.run(append(base, args...)...)
 	return decodeJSON[[]nodeRecord](h.t, out.Stdout)
 }
 
@@ -272,7 +287,10 @@ func TestCLIEndToEnd(t *testing.T) {
 		require.Contains(t, errText, "synapse is not initialized")
 
 		initOut := h.run("init")
-		require.Equal(t, "synapse initialized", initOut.Stdout)
+		initResult := decodeJSON[map[string]any](t, initOut.Stdout)
+		require.Equal(t, "ok", initResult["status"])
+		require.Equal(t, "initialized", initResult["action"])
+		require.Equal(t, h.dbPath, initResult["db_path"])
 
 		cfg := h.getConfig()
 		require.Equal(t, "file", cfg.Logging.Logger.Type)
@@ -377,7 +395,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		hits := h.searchNodes("blue")
 		require.ElementsMatch(t, []string{alphaID, betaID}, hits)
 
-		graph := h.graphGet(alphaID, "--depth", "2", "--breadth", "5")
+		graph := h.graphGet([]string{alphaID}, "--depth", "2", "--breadth", "5")
 		require.Len(t, graph, 3)
 		require.ElementsMatch(t, []string{alphaID, betaID, gammaID}, []string{graph[0].ID, graph[1].ID, graph[2].ID})
 
@@ -385,7 +403,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		require.Len(t, searchGraph, 2)
 
 		h.run("links", "remove", alphaID, betaID)
-		graphAfterUnlink := h.graphGet(alphaID, "--depth", "2", "--breadth", "5")
+		graphAfterUnlink := h.graphGet([]string{alphaID}, "--depth", "2", "--breadth", "5")
 		require.Len(t, graphAfterUnlink, 1)
 		require.Equal(t, alphaID, graphAfterUnlink[0].ID)
 	})
@@ -473,10 +491,10 @@ func TestCLIEndToEnd(t *testing.T) {
 		errText = h.runErr("nodes", "keywords", "update", nodeID, `{"bad":true}`)
 		require.Contains(t, errText, "cannot unmarshal object into Go value of type []string")
 
-		errText = h.runErr("graph", "get", nodeID, "--depth", "-1")
+		errText = h.runErr("graph", "get", fmt.Sprintf("[%q]", nodeID), "--depth", "-1")
 		require.Contains(t, errText, "depth must be non-negative")
 
-		errText = h.runErr("graph", "get", nodeID, "--breadth", "0")
+		errText = h.runErr("graph", "get", fmt.Sprintf("[%q]", nodeID), "--breadth", "0")
 		require.Contains(t, errText, "breadth must be positive")
 
 		errText = h.runErr("links", "add", nodeID, nodeID)

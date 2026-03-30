@@ -17,7 +17,10 @@ var replicationRunCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		return service.RunReplication(cmd.Context())
+		if err := service.RunReplication(cmd.Context()); err != nil {
+			return err
+		}
+		return writeOK("replication_ran", nil)
 	},
 }
 
@@ -34,7 +37,10 @@ var replicationRestoreCmd = &cobra.Command{
 		if err := service.Restore(cmd.Context()); err != nil {
 			return err
 		}
-		return service.RunProjections(cmd.Context())
+		if err := service.RunProjections(cmd.Context()); err != nil {
+			return err
+		}
+		return writeOK("replication_restored", nil)
 	},
 }
 

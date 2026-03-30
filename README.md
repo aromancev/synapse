@@ -119,12 +119,26 @@ Write commands do three things:
 
 Read commands query projections, not raw events.
 
+Mutating commands return small JSON result envelopes like:
+
+```json
+{"status":"ok","action":"node_added","id":"node_...","schema_id":"schema_..."}
+```
+
 ### JSON input
 
 Commands that accept JSON can read it either:
 
 - as a positional argument
 - from `stdin`
+
+Structured query commands use JSON too. For example:
+
+```bash
+synapse nodes search '{"query":"readme"}'
+synapse graph get '["node_01...","node_02..."]'
+synapse graph search '{"query":"engineering"}' --depth 2
+```
 
 Argument form:
 
@@ -225,10 +239,10 @@ synapse nodes list --schema-id "$TASK_SCHEMA_ID" \
     '
 ```
 
-Find nodes by keywords through the built-in search, then inspect them:
+Find nodes by query through the built-in search, then inspect them:
 
 ```bash
-synapse nodes search readme \
+synapse nodes search '{"query":"readme"}' \
   | jq -r '.[]'
 ```
 
@@ -380,7 +394,7 @@ synapse links add "$ADA" "$GRACE"
 Traverse by explicit IDs:
 
 ```bash
-synapse graph get "$ADA" --depth 2 --breadth 10
+synapse graph get "[\"$ADA\"]" --depth 2 --breadth 10
 ```
 
 That returns the seed node plus linked nodes discovered during traversal.
@@ -388,7 +402,7 @@ That returns the seed node plus linked nodes discovered during traversal.
 Traverse from search results instead of explicit IDs:
 
 ```bash
-synapse graph search Ada --search-limit 5 --depth 2 --breadth 10
+synapse graph search '{"query":"Ada"}' --search-limit 5 --depth 2 --breadth 10
 ```
 
 A practical pattern is to search by keywords first, then expand context:
@@ -397,13 +411,13 @@ A practical pattern is to search by keywords first, then expand context:
 synapse nodes keywords update "$ADA" '["people", "engineering", "ada"]'
 synapse nodes keywords update "$TASK_A" '["task", "docs", "readme"]'
 
-synapse graph search engineering --search-limit 3 --depth 2 --breadth 10
+synapse graph search '{"query":"engineering"}' --search-limit 3 --depth 2 --breadth 10
 ```
 
 Search node IDs only:
 
 ```bash
-synapse nodes search engineering --limit 10
+synapse nodes search '{"query":"engineering"}' --limit 10
 ```
 
 ### Configuring replication
@@ -760,13 +774,13 @@ Recommended setup for boring reliability:
 | `synapse nodes list --schema-id <schema-id> [--archived]` | List nodes for a schema |
 | `synapse nodes update <node-id> [json]` | Replace node payload |
 | `synapse nodes archive <node-id>` | Archive a node |
-| `synapse nodes search <keywords...> [--limit N]` | Search node IDs |
+| `synapse nodes search [json-query-object] [--limit N]` | Search node IDs |
 | `synapse nodes keywords get <node-id>` | Read keywords |
 | `synapse nodes keywords update <node-id> [json-array]` | Replace keywords |
 | `synapse links add <from-node-id> <to-node-id>` | Create a link |
 | `synapse links remove <from-node-id> <to-node-id>` | Remove a link |
-| `synapse graph get <node-id>... [--depth N] [--breadth N]` | Traverse from explicit IDs |
-| `synapse graph search <keywords...> [--search-limit N] [--depth N] [--breadth N]` | Search first, then traverse |
+| `synapse graph get [json-node-id-array] [--depth N] [--breadth N]` | Traverse from explicit IDs |
+| `synapse graph search [json-query-object] [--search-limit N] [--depth N] [--breadth N]` | Search first, then traverse |
 | `synapse projections run` | Rebuild projections incrementally |
 | `synapse replication run` | Replicate pending events |
 | `synapse replication restore` | Restore event store from configured replicator |

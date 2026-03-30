@@ -1,6 +1,9 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/aromancev/synapse/internal/domains/events/schemas"
+	"github.com/spf13/cobra"
+)
 
 var listArchivedSchemas bool
 
@@ -19,12 +22,18 @@ var schemasListCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+			if storedSchemas == nil {
+				storedSchemas = []schemas.Schema{}
+			}
 			return writeJSON(storedSchemas)
 		}
 
 		storedSchemas, err := service.GetSchemas(cmd.Context())
 		if err != nil {
 			return err
+		}
+		if storedSchemas == nil {
+			storedSchemas = []schemas.Schema{}
 		}
 		return writeJSON(storedSchemas)
 	},

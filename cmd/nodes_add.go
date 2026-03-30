@@ -46,8 +46,10 @@ var nodesAddCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println(nodeID.String())
-		return nil
+		return writeOK("node_added", map[string]any{
+			"id":        nodeID.String(),
+			"schema_id": schemaID.String(),
+		})
 	},
 }
 

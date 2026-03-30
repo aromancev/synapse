@@ -40,7 +40,9 @@ var nodesUpdateCmd = &cobra.Command{
 			return err
 		}
 
-		return writeJSON(map[string]string{"id": nodeID.String()})
+		return writeOK("node_updated", map[string]any{
+			"id": nodeID.String(),
+		})
 	},
 }
 

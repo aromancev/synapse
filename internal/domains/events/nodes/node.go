@@ -100,16 +100,19 @@ func (n Node) MarshalJSON() ([]byte, error) {
 		ArchivedAt *string         `json:"archived_at,omitempty"`
 		Payload    json.RawMessage `json:"payload"`
 		Keywords   []string        `json:"keywords"`
-		SearchText string          `json:"search_text"`
+	}
+
+	keywords := n.Keywords
+	if keywords == nil {
+		keywords = []string{}
 	}
 
 	encoded := nodeJSON{
-		ID:         n.ID,
-		SchemaID:   n.SchemaID,
-		CreatedAt:  events.FormatUnixTimestamp(n.CreatedAt),
-		Payload:    n.Payload,
-		Keywords:   n.Keywords,
-		SearchText: n.SearchText,
+		ID:        n.ID,
+		SchemaID:  n.SchemaID,
+		CreatedAt: events.FormatUnixTimestamp(n.CreatedAt),
+		Payload:   n.Payload,
+		Keywords:  keywords,
 	}
 	if n.ArchivedAt > 0 {
 		archivedAt := events.FormatUnixTimestamp(n.ArchivedAt)

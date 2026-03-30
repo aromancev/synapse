@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
@@ -35,8 +33,9 @@ var nodesArchiveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println(nodeID.String())
-		return nil
+		return writeOK("node_archived", map[string]any{
+			"id": nodeID.String(),
+		})
 	},
 }
 

@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
@@ -40,8 +38,10 @@ var linksRemoveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println("ok")
-		return nil
+		return writeOK("link_removed", map[string]any{
+			"from": fromID.String(),
+			"to":   toID.String(),
+		})
 	},
 }
 

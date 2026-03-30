@@ -45,7 +45,10 @@ var nodesKeywordsUpdateCmd = &cobra.Command{
 			return err
 		}
 
-		return nil
+		return writeOK("node_keywords_updated", map[string]any{
+			"id":       nodeID.String(),
+			"keywords": keywords,
+		})
 	},
 }
 
