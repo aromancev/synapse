@@ -11,17 +11,13 @@ var (
 )
 
 var graphGetCmd = &cobra.Command{
-	Use:   "get <node-id>...",
+	Use:   "get [json-node-id-array]",
 	Short: "Traverse the graph from explicit node IDs",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		frontier := make([]nodes.ID, 0, len(args))
-		for _, arg := range args {
-			id, err := nodes.ParseID(arg)
-			if err != nil {
-				return err
-			}
-			frontier = append(frontier, id)
+		frontier, err := readNodeIDArrayPayload(args)
+		if err != nil {
+			return err
 		}
 
 		service, _, cleanup, err := openSynapse()
@@ -33,6 +29,9 @@ var graphGetCmd = &cobra.Command{
 		linked, err := service.GetLinkedNodes(cmd.Context(), frontier, graphGetDepth, graphGetBreadth)
 		if err != nil {
 			return err
+		}
+		if linked == nil {
+			linked = []nodes.Node{}
 		}
 
 		return writeJSON(linked)

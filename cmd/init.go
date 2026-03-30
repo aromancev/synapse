@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events"
@@ -48,8 +47,7 @@ var initCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println("synapse initialized")
-		return nil
+		return writeOK("initialized", map[string]any{"db_path": dbPath})
 	},
 }
 

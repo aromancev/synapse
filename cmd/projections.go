@@ -17,7 +17,10 @@ var projectionsRunCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		return service.RunProjections(cmd.Context())
+		if err := service.RunProjections(cmd.Context()); err != nil {
+			return err
+		}
+		return writeOK("projections_ran", nil)
 	},
 }
 

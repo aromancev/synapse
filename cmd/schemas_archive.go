@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/schemas"
 	"github.com/spf13/cobra"
@@ -35,8 +33,9 @@ var schemasArchiveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println(schemaID.String())
-		return nil
+		return writeOK("schema_archived", map[string]any{
+			"id": schemaID.String(),
+		})
 	},
 }
 

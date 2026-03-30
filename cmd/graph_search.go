@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"strings"
-
+	"github.com/aromancev/synapse/internal/domains/events/nodes"
 	"github.com/spf13/cobra"
 )
 
@@ -13,17 +12,21 @@ var (
 )
 
 var graphSearchCmd = &cobra.Command{
-	Use:   "search <keywords...>",
+	Use:   "search [json-query-object]",
 	Short: "Search for seed nodes, then traverse the graph",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		input, err := readQueryInput(args)
+		if err != nil {
+			return err
+		}
 		service, _, cleanup, err := openSynapse()
 		if err != nil {
 			return err
 		}
 		defer cleanup()
 
-		seedIDs, err := service.SearchNodes(cmd.Context(), strings.Join(args, " "), graphSearchLimit)
+		seedIDs, err := service.SearchNodes(cmd.Context(), input.Query, graphSearchLimit)
 		if err != nil {
 			return err
 		}
@@ -31,6 +34,9 @@ var graphSearchCmd = &cobra.Command{
 		linked, err := service.GetLinkedNodes(cmd.Context(), seedIDs, graphSearchDepth, graphSearchBreadth)
 		if err != nil {
 			return err
+		}
+		if linked == nil {
+			linked = []nodes.Node{}
 		}
 
 		return writeJSON(linked)

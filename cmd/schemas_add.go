@@ -41,8 +41,10 @@ var schemasAddCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println(schemaID.String())
-		return nil
+		return writeOK("schema_added", map[string]any{
+			"id":   schemaID.String(),
+			"name": addSchemaName,
+		})
 	},
 }
 
