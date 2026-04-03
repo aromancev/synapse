@@ -1,6 +1,6 @@
 ---
 name: synapse
-description: Local event-sourced knowledge graph and agent memory CLI backed by SQLite. Use when working with the `synapse` command to initialize a database, define JSON Schemas, add or update nodes, manage keywords, create or remove links, traverse the graph, search nodes, or configure/operate event replication and restore flows.
+description: Associative structured local memory store. Use to remember and recall anything and retrieve linked memories.
 ---
 
 # Synapse
@@ -11,10 +11,7 @@ Keep workflows boring and explicit:
 
 - initialize once with `synapse init`
 - define schemas before adding nodes
-- treat node payload updates as full replacement
 - use `jq` for filtering and patch-like transforms
-- use search for seed IDs, then graph traversal for context expansion
-- treat projections as derived state and events as source of truth
 
 ## Core model
 
@@ -23,17 +20,16 @@ Synapse has three main concepts:
 1. **Schemas**
    - runtime JSON Schemas
    - define the allowed structure of node payloads
-   - archived schemas remain in history
 
 2. **Nodes**
    - typed records validated against a schema
-   - have payload, keywords, and archive state
+   - have payload and keywords
    - payload updates replace the entire payload
 
 3. **Links**
    - connections between node pairs
-   - used for graph traversal
-   - self-links are invalid
+   - used for graph traversal and associative memory 
+   - links are bidirectional
 
 IDs are prefixed and human-readable:
 
