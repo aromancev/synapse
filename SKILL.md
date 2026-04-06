@@ -262,10 +262,10 @@ synapse nodes list --schema-id "$TASK_SCHEMA_ID" \
 The guidelines in this section are IMPORTANT. Make sure to follow them and help your user to follow them as well.
 
 ### Schemas
-Each schema should have a clear description of how its nodes can be used and what situations they can be used in. For example, for a task schema the description can be like this:
+Each schema should have a top-level description (JSON schema `description` field) of how its nodes can be used and what situations they can be used in. For example, for a task schema the description can be like this:
 "Task tracks the state of a work in progress. Use whenever working on a long-running task or a follow-up. When the task is done, archive the node. To select all tasks that need to be reviewed, filter by 'check_after' ISO date field with jq."
 
-Each field of the schema should have a clear and concise description of how to use it.
+Each field of the schema should also have a clear and concise description of how to use it.
 
 Schema design should not imply hundreds of node updates because node aggregate will become slow. A task node that will get updated maybe a few dozen times maximum over its lifetime is fine. A single project node that can live for years and get hundreds of updates is bad. Instead, create separate nodes (e.g. tasks) and link them to the project.
 
