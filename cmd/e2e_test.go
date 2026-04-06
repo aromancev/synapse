@@ -220,14 +220,6 @@ func (h *cliHarness) getKeywords(nodeID string) []string {
 	return decodeJSON[[]string](h.t, out.Stdout)
 }
 
-func (h *cliHarness) searchNodes(query string, args ...string) []string {
-	h.t.Helper()
-	payload := fmt.Sprintf(`{"query":%q}`, query)
-	base := []string{"nodes", "search", payload}
-	out := h.run(append(base, args...)...)
-	return decodeJSON[[]string](h.t, out.Stdout)
-}
-
 func (h *cliHarness) graphGet(nodeIDs []string, args ...string) []nodeRecord {
 	h.t.Helper()
 	payload, err := json.Marshal(nodeIDs)
@@ -237,9 +229,29 @@ func (h *cliHarness) graphGet(nodeIDs []string, args ...string) []nodeRecord {
 	return decodeJSON[[]nodeRecord](h.t, out.Stdout)
 }
 
-func (h *cliHarness) graphSearch(query string, args ...string) []nodeRecord {
+func (h *cliHarness) searchNodes(query []string, args ...string) []string {
 	h.t.Helper()
-	payload := fmt.Sprintf(`{"query":%q}`, query)
+	payload, err := json.Marshal(map[string]any{"query": query})
+	require.NoError(h.t, err)
+	return h.searchNodesJSON(string(payload), args...)
+}
+
+func (h *cliHarness) searchNodesJSON(payload string, args ...string) []string {
+	h.t.Helper()
+	base := []string{"nodes", "search", payload}
+	out := h.run(append(base, args...)...)
+	return decodeJSON[[]string](h.t, out.Stdout)
+}
+
+func (h *cliHarness) graphSearch(query []string, args ...string) []nodeRecord {
+	h.t.Helper()
+	payload, err := json.Marshal(map[string]any{"query": query})
+	require.NoError(h.t, err)
+	return h.graphSearchJSON(string(payload), args...)
+}
+
+func (h *cliHarness) graphSearchJSON(payload string, args ...string) []nodeRecord {
+	h.t.Helper()
 	base := []string{"graph", "search", payload}
 	out := h.run(append(base, args...)...)
 	return decodeJSON[[]nodeRecord](h.t, out.Stdout)
@@ -376,7 +388,24 @@ func TestCLIEndToEnd(t *testing.T) {
 		requireRFC3339(t, archivedSchemas[0].ArchivedAt)
 	})
 
-	t.Run("node search and graph traversal through links", func(t *testing.T) {
+	t.Run("array query search uses OR across items and AND within each item", func(t *testing.T) {
+		h := newCLIHarness(t)
+		h.init()
+
+		schemaID := h.addSchema("note", `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"}},"required":["title"]}`)
+		alphaID := h.addNode(schemaID, `{"title":"Alpha","body":"blue fox"}`)
+		betaID := h.addNode(schemaID, `{"title":"Beta","body":"blue moon"}`)
+		gammaID := h.addNode(schemaID, `{"title":"Gamma","body":"green field"}`)
+
+		h.updateKeywords(alphaID, `["blue","fox"]`)
+		h.updateKeywords(betaID, `["blue","moon"]`)
+		h.updateKeywords(gammaID, `["green"]`)
+
+		hits := h.searchNodes([]string{"blue fox", "green"})
+		require.ElementsMatch(t, []string{alphaID, gammaID}, hits)
+	})
+
+	t.Run("graph traversal expands from array query search seeds", func(t *testing.T) {
 		h := newCLIHarness(t)
 		h.init()
 
@@ -392,15 +421,18 @@ func TestCLIEndToEnd(t *testing.T) {
 		h.run("links", "add", alphaID, betaID)
 		h.run("links", "add", betaID, gammaID)
 
-		hits := h.searchNodes("blue")
+		hits := h.searchNodes([]string{"blue"})
 		require.ElementsMatch(t, []string{alphaID, betaID}, hits)
 
 		graph := h.graphGet([]string{alphaID}, "--depth", "2", "--breadth", "5")
 		require.Len(t, graph, 3)
 		require.ElementsMatch(t, []string{alphaID, betaID, gammaID}, []string{graph[0].ID, graph[1].ID, graph[2].ID})
 
-		searchGraph := h.graphSearch("blue", "--search-limit", "1", "--depth", "1", "--breadth", "5")
+		searchGraph := h.graphSearch([]string{"blue"}, "--search-limit", "1", "--depth", "1", "--breadth", "5")
 		require.Len(t, searchGraph, 2)
+
+		keywordGraph := h.graphSearch([]string{"blue fox", "green"}, "--search-limit", "5", "--depth", "0", "--breadth", "5")
+		require.ElementsMatch(t, []string{alphaID, gammaID}, []string{keywordGraph[0].ID, keywordGraph[1].ID})
 
 		h.run("links", "remove", alphaID, betaID)
 		graphAfterUnlink := h.graphGet([]string{alphaID}, "--depth", "2", "--breadth", "5")
@@ -490,6 +522,12 @@ func TestCLIEndToEnd(t *testing.T) {
 
 		errText = h.runErr("nodes", "keywords", "update", nodeID, `{"bad":true}`)
 		require.Contains(t, errText, "cannot unmarshal object into Go value of type []string")
+
+		errText = h.runErr("nodes", "search", `{"query":[]}`)
+		require.Contains(t, errText, "query is required")
+
+		errText = h.runErr("nodes", "search", `{"query":123}`)
+		require.Contains(t, errText, "decode query input")
 
 		errText = h.runErr("graph", "get", fmt.Sprintf("[%q]", nodeID), "--depth", "-1")
 		require.Contains(t, errText, "depth must be non-negative")

@@ -119,7 +119,7 @@ synapse nodes archive <node-id>
 Search node IDs:
 
 ```bash
-synapse nodes search '{"query":"keyword phrase"}' --limit 20
+synapse nodes search '{"query":["keyword phrase"]}' --limit 20
 ```
 
 ### Keywords
@@ -154,7 +154,7 @@ synapse graph get '["<node-id>"]' --depth 2 --breadth 10
 Search first, then traverse:
 
 ```bash
-synapse graph search '{"query":"keyword phrase"}' --search-limit 5 --depth 2 --breadth 10
+synapse graph search '{"query":["keyword phrase"]}' --search-limit 5 --depth 2 --breadth 10
 ```
 
 ### Projections and replication
@@ -184,7 +184,7 @@ Commands that accept JSON can read it either:
 - as a positional argument
 - from `stdin`
 
-Structured query commands use JSON too.
+Structured query commands use JSON too. `query` is always an array: each array element is OR-ed, and the space-separated words inside one element are AND-ed.
 
 Examples:
 
@@ -192,9 +192,11 @@ Examples:
 synapse schemas add --name note '{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}'
 synapse nodes add --schema-id "$SCHEMA_ID" '{"title":"Write README","status":"todo"}'
 synapse nodes update "$NODE_ID" '{"title":"Write README","status":"done"}'
-synapse nodes search '{"query":"readme"}'
+synapse nodes search '{"query":["readme"]}'
+synapse nodes search '{"query":["readme docs","ops"]}'
 synapse graph get '["node_01..."]'
-synapse graph search '{"query":"engineering"}' --depth 2
+synapse graph search '{"query":["engineering"]}' --depth 2
+synapse graph search '{"query":["engineering sqlite","golang"]}' --depth 2
 ```
 
 `stdin` form:

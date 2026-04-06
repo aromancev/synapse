@@ -145,10 +145,14 @@ Commands that accept JSON can read it either:
 Structured query commands use JSON too. For example:
 
 ```bash
-synapse nodes search '{"query":"readme"}'
+synapse nodes search '{"query":["readme"]}'
+synapse nodes search '{"query":["readme docs","ops"]}'
 synapse graph get '["node_01...","node_02..."]'
-synapse graph search '{"query":"engineering"}' --depth 2
+synapse graph search '{"query":["engineering"]}' --depth 2
+synapse graph search '{"query":["engineering sqlite","golang"]}' --depth 2
 ```
+
+`query` is always an array. Each element is an OR clause and space-separated words inside one element are treated as AND. So `{"query":["foo bar","baz"]}` means `(foo AND bar) OR baz`.
 
 Argument form:
 
@@ -743,6 +747,8 @@ The intended pattern today is simple:
 2. search for seed nodes
 3. expand graph context
 4. finish with `jq`
+
+`query` is always array-based: each element is OR-ed and the words inside each element are AND-ed.
 
 ## Backup and restore workflow
 
