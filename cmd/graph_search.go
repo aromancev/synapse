@@ -26,7 +26,7 @@ var graphSearchCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		seedIDs, err := service.SearchNodes(cmd.Context(), input.Query, graphSearchLimit)
+		seedIDs, err := service.SearchNodes(cmd.Context(), buildFTSQuery(input.Query), graphSearchLimit)
 		if err != nil {
 			return err
 		}

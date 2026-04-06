@@ -182,6 +182,27 @@ func TestRepository(t *testing.T) {
 		assert.Empty(t, hits)
 	})
 
+	t.Run("SearchNodeIDs supports explicit OR clauses with grouped AND terms", func(t *testing.T) {
+		repo, db := newTestRepository(t)
+		ctx := context.Background()
+		schemaID := events.StreamID("schema_01HXYZ")
+		alphaID, err := NewID()
+		require.NoError(t, err)
+		betaID, err := NewID()
+		require.NoError(t, err)
+		gammaID, err := NewID()
+		require.NoError(t, err)
+
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: alphaID, SchemaID: schemaID, CreatedAt: 1700000000, Payload: json.RawMessage(`{"title":"Alpha"}`), Keywords: []string{"blue", "fox"}}))
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: betaID, SchemaID: schemaID, CreatedAt: 1700000010, Payload: json.RawMessage(`{"title":"Beta"}`), Keywords: []string{"blue", "moon"}}))
+		require.NoError(t, repo.UpsertNode(ctx, db, Node{ID: gammaID, SchemaID: schemaID, CreatedAt: 1700000020, Payload: json.RawMessage(`{"title":"Gamma"}`), Keywords: []string{"green"}}))
+
+		hits, err := repo.SearchNodeIDs(ctx, db, `("blue" "fox") OR "green"`, 10)
+		require.NoError(t, err)
+		require.Len(t, hits, 2)
+		assert.ElementsMatch(t, []ID{alphaID, gammaID}, []ID{hits[0].ID, hits[1].ID})
+	})
+
 	t.Run("ID uses prefixed text form", func(t *testing.T) {
 		id, err := NewID()
 		require.NoError(t, err)

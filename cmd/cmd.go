@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/aromancev/synapse/internal/config"
 	"github.com/aromancev/synapse/internal/domains/events/nodes"
@@ -119,7 +120,7 @@ func readStringPayload(args []string) (string, error) {
 }
 
 type queryInput struct {
-	Query string `json:"query"`
+	Query []string `json:"query"`
 }
 
 func readQueryInput(args []string) (queryInput, error) {
@@ -132,10 +133,70 @@ func readQueryInput(args []string) (queryInput, error) {
 	if err := json.Unmarshal([]byte(payloadJSON), &input); err != nil {
 		return queryInput{}, fmt.Errorf("decode query input: %w", err)
 	}
-	if input.Query == "" {
+
+	input.Query = normalizeSearchTerms(input.Query)
+	if len(input.Query) == 0 {
 		return queryInput{}, fmt.Errorf("query is required")
 	}
+
 	return input, nil
+}
+
+func buildFTSQuery(terms []string) string {
+	terms = normalizeSearchTerms(terms)
+	if len(terms) == 0 {
+		return ""
+	}
+	return buildKeywordGroupFTSQuery(terms)
+}
+
+func normalizeSearchTerms(terms []string) []string {
+	if len(terms) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(terms))
+	for _, term := range terms {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		term = strings.Join(strings.Fields(term), " ")
+		if term == "" {
+			continue
+		}
+		out = append(out, term)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildKeywordGroupFTSQuery(terms []string) string {
+	clauses := make([]string, 0, len(terms))
+	for _, term := range terms {
+		parts := strings.Fields(term)
+		if len(parts) == 0 {
+			continue
+		}
+
+		escapedParts := make([]string, 0, len(parts))
+		for _, part := range parts {
+			escapedParts = append(escapedParts, quoteFTSTerm(part))
+		}
+
+		clause := strings.Join(escapedParts, " ")
+		if len(escapedParts) > 1 {
+			clause = "(" + clause + ")"
+		}
+		clauses = append(clauses, clause)
+	}
+	return strings.Join(clauses, " OR ")
+}
+
+func quoteFTSTerm(term string) string {
+	return `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
 }
 
 func readNodeIDPayload(args []string) (nodes.ID, error) {

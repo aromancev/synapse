@@ -19,7 +19,7 @@ var nodesSearchCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		ids, err := service.SearchNodes(cmd.Context(), input.Query, nodesSearchLimit)
+		ids, err := service.SearchNodes(cmd.Context(), buildFTSQuery(input.Query), nodesSearchLimit)
 		if err != nil {
 			return err
 		}
