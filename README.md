@@ -50,8 +50,18 @@ If you use `GOBIN`, the binary will be installed there instead.
 ```bash
 git clone https://github.com/aromancev/synapse.git
 cd synapse
-go build -o synapse .
+go build -o synapse ./cmd/synapse
 ```
+
+### Install from source into ~/.local/bin
+
+```bash
+git clone https://github.com/aromancev/synapse.git
+cd synapse
+./scripts/install.sh
+```
+
+That builds the binary into `.bin/synapse` and symlinks it to `~/.local/bin/synapse`.
 
 Or run it without building:
 
