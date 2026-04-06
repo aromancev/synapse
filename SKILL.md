@@ -11,7 +11,10 @@ Keep workflows boring and explicit:
 
 - initialize once with `synapse init`
 - define schemas before adding nodes
+- treat node payload updates as full replacement
 - use `jq` for filtering and patch-like transforms
+- use search for seed IDs, then graph traversal for context expansion
+- treat projections as derived state and events as source of truth
 
 ## Core model
 
@@ -20,16 +23,17 @@ Synapse has three main concepts:
 1. **Schemas**
    - runtime JSON Schemas
    - define the allowed structure of node payloads
+   - archived schemas remain in history
 
 2. **Nodes**
    - typed records validated against a schema
-   - have payload and keywords
+   - have payload, keywords, and archive state
    - payload updates replace the entire payload
 
 3. **Links**
    - connections between node pairs
-   - used for graph traversal and associative memory 
-   - links are bidirectional
+   - used for graph traversal
+   - self-links are invalid
 
 IDs are prefixed and human-readable:
 
@@ -124,7 +128,7 @@ synapse nodes archive <node-id>
 Search node IDs:
 
 ```bash
-synapse nodes search keyword phrase --limit 20
+synapse nodes search '{"query":"keyword phrase"}' --limit 20
 ```
 
 ### Keywords
@@ -153,13 +157,13 @@ synapse links remove <from-node-id> <to-node-id>
 Traverse from explicit node IDs:
 
 ```bash
-synapse graph get <node-id>... --depth 2 --breadth 10
+synapse graph get '["<node-id>"]' --depth 2 --breadth 10
 ```
 
 Search first, then traverse:
 
 ```bash
-synapse graph search keyword phrase --search-limit 5 --depth 2 --breadth 10
+synapse graph search '{"query":"keyword phrase"}' --search-limit 5 --depth 2 --breadth 10
 ```
 
 ### Projections and replication
@@ -180,6 +184,35 @@ Restore from configured replicator into an empty event store:
 
 ```bash
 synapse replication restore
+```
+
+## JSON input and query shapes
+
+Commands that accept JSON can read it either:
+
+- as a positional argument
+- from `stdin`
+
+Structured query commands use JSON too.
+
+Examples:
+
+```bash
+synapse schemas add --name note '{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}'
+synapse nodes add --schema-id "$SCHEMA_ID" '{"title":"Write README","status":"todo"}'
+synapse nodes update "$NODE_ID" '{"title":"Write README","status":"done"}'
+synapse nodes search '{"query":"readme"}'
+synapse graph get '["node_01..."]'
+synapse graph search '{"query":"engineering"}' --depth 2
+```
+
+`stdin` form:
+
+```bash
+cat schema.json | synapse schemas add --name note
+cat payload.json | synapse nodes add --schema-id "$SCHEMA_ID"
+cat payload.json | synapse nodes update "$NODE_ID"
+cat keywords.json | synapse nodes keywords update "$NODE_ID"
 ```
 
 ## jq workflow patterns
