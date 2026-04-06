@@ -7,15 +7,6 @@ description: Associative structured local memory store. Use to remember and reca
 
 Use the `synapse` CLI as a structured local memory and graph store.
 
-Keep workflows boring and explicit:
-
-- initialize once with `synapse init`
-- define schemas before adding nodes
-- treat node payload updates as full replacement
-- use `jq` for filtering and patch-like transforms
-- use search for seed IDs, then graph traversal for context expansion
-- treat projections as derived state and events as source of truth
-
 ## Core model
 
 Synapse has three main concepts:
@@ -32,8 +23,8 @@ Synapse has three main concepts:
 
 3. **Links**
    - connections between node pairs
+   - links are bidirectional
    - used for graph traversal
-   - self-links are invalid
 
 IDs are prefixed and human-readable:
 
@@ -267,94 +258,50 @@ synapse nodes list --schema-id "$TASK_SCHEMA_ID" \
     '
 ```
 
-## Typical task workflow
+## Usage best practice
+The guidelines in this section are IMPORTANT. Make sure to follow them and help your user to follow them as well.
 
-For task tracking or agent memory, use this order:
+### Schemas
+Each schema should have a clear description of how its nodes can be used and what situations they can be used in. For example, for a task schema the description can be like this:
+"Task tracks the state of a work in progress. Use whenever working on a long-running task or a follow-up. When the task is done, archive the node. To select all tasks that need to be reviewed, filter by 'check_after' ISO date field with jq."
 
-1. add a schema such as `task`, `person`, `project`, or `note`
-2. add nodes with valid payloads
-3. add keywords that make search practical
-4. create links between related nodes
-5. use `nodes search` or `graph search` to find starting points
-6. use `graph get` to expand by explicit IDs
-7. archive instead of deleting when something should disappear from normal reads
+Each field of the schema should have a clear and concise description of how to use it.
 
-## Replication workflow
+Schema design should not imply hundreds of node updates because node aggregate will become slow. A task node that will get updated maybe a few dozen times maximum over its lifetime is fine. A single project node that can live for years and get hundreds of updates is bad. Instead, create separate nodes (e.g. tasks) and link them to the project.
 
-Replication is event-based, not projection-based.
+Design schemas for future use. Schemas are immutable so make sure it is flexible enough but still concrete enough to be useful. Check with your user before creating a schema to make sure it's correct.
 
-Config has three modes:
+### Nodes
+Don't be afraid to create many nodes. If you encounter something that fits a schema, create a node for it. Nodes are your memory. It's essential to document everything that happends so that a new session can remember important details and you become smarter with time.
 
-- `disabled` — no replication
-- `manual` — write events locally, run `synapse replication run` yourself
-- `auto` — mutating commands replicate automatically after appending events
+Whenever you create a node, add 5-20 keywords for it depending on complexity. Do not add irrelevant keywords to avoid keyword polluting. Think about keywords that you would search with when looking for this node.
 
-Current replicator type is file-based JSONL.
+When you retrieve nodes, make use of `jq` and `--limit` to protect your context window from pollution. For example, don't fetch all tasks and then decide which ones to follow on. Filter by task status instead. If you only want to work on a single task, limit selection to one node. If you only need information from certain node fields, filter out irrelevant fields with `jq`.
 
-Recommended pattern:
+### Links
+Two nodes should be linked if they are likely to be useful together when retrieved from memory. For example:
+- A task node may link to a learning node if that learning can help achieve that task.
+- A person node may link to a place node if that person loves in that place.
+- A project node can be linked to many task nodes if they move that project forwards.
 
-1. configure logging and replication
-2. use `manual` if you want explicit checkpointed backup behavior
-3. use `auto` if immediate replication is worth the extra write cost
-4. keep replica files somewhere durable
-5. restore only into a fresh empty database
+What should not be linked:
+- Two tasks just because they were created at the same time.
+- Two learnings just because they help working with the same tool. Link them both to the tool node instead, otherwise you'll have to link n^2 learnings about each tool.
 
-## Event sourcing architecture
-
-Synapse is event-sourced.
-
-The source of truth is the append-only event log, not the latest row in a mutable table.
-
-Write path:
-
-1. load the stream for the target aggregate
-2. replay prior events into the aggregate
-3. validate invariants and schema constraints
-4. record new events
-5. append events transactionally
-6. run replication if configured
-7. run projections so reads stay current
-
-Read path:
-
-1. query projections, not raw streams
-2. use search to find seed nodes
-3. traverse links for related context
-
-Why this matters:
-
-- history is auditable
-- projections are rebuildable
-- replication is straightforward
-- restore is deterministic
-- invariants stay inside aggregate logic instead of leaking into ad hoc update code
-
-## Sharp edges
-
-Remember these:
-
-- run `synapse init` before almost anything else
-- `nodes list` requires `--schema-id`
-- `nodes update` replaces the full payload
-- `nodes keywords update` replaces the full keyword array
-- archived nodes are excluded from normal graph traversal
-- `graph get` rejects negative depth and non-positive breadth
-- `links add` rejects self-links
-- `replication restore` requires an empty target event store
-
-## Preferred style
+### Preferred style
 
 Prefer simple shell pipelines over wrappers.
 
 Good:
-
 - `synapse ... | jq ...`
 - JSON payloads via stdin
 - explicit `--db-path` when scripting against multiple databases
 
 Avoid:
-
 - hidden partial updates
 - assuming search is semantic/vector-based
-- editing projection tables directly
-- restoring into a non-empty database
+
+### Sharp edges
+- `nodes update` replaces the full payload
+- `nodes keywords update` replaces the full keyword array
+- archived nodes are excluded from normal graph traversal
