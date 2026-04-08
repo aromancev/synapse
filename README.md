@@ -585,6 +585,7 @@ Important properties:
 
 - events are append-only
 - each stream has optimistic concurrency via `(stream_id, stream_version)`
+- each stream accepts at most 100 events total, then further writes are rejected
 - the whole store is globally ordered by `global_position`
 
 #### 2. Streams
@@ -680,6 +681,7 @@ A few sharp edges worth knowing:
 - `nodes add` fails if `--schema-id` is missing
 - `nodes list` currently requires `--schema-id`
 - node payload updates are validated against the schema every time
+- each stream is capped at 100 events total, so over-mutated aggregates fail fast
 - `graph get` rejects negative depth and non-positive breadth
 - `links add` rejects self-links
 - `replication restore` fails unless the target event store is empty
