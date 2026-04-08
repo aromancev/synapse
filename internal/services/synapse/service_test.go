@@ -139,6 +139,34 @@ func TestSynapse_AddNode(t *testing.T) {
 		require.NoError(t, streamErr)
 		assert.Len(t, eventsInStream, 2)
 	})
+
+	t.Run("fails when node stream reaches max events", func(t *testing.T) {
+		svc, eventsRepo, db := newTestService(t, nil)
+
+		_, err := svc.AddSchema(context.Background(), "person", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`))
+		require.NoError(t, err)
+		seedEvents, err := eventsRepo.GetStreamEvents(context.Background(), db, "", 0, 100)
+		require.NoError(t, err)
+		require.Len(t, seedEvents, 1)
+		schemaID, err := schemas.ParseID(seedEvents[0].StreamID.String())
+		require.NoError(t, err)
+
+		nodeID, err := svc.AddNode(context.Background(), schemaID, json.RawMessage(`{"name":"Ada"}`))
+		require.NoError(t, err)
+
+		for i := int64(0); i < events.MaxEventsPerStream-1; i++ {
+			err = svc.UpdateNode(context.Background(), nodeID, json.RawMessage([]byte(fmt.Sprintf(`{"name":"Ada %d"}`, i))))
+			require.NoError(t, err)
+		}
+
+		err = svc.UpdateNode(context.Background(), nodeID, json.RawMessage(`{"name":"Too far"}`))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, events.ErrStreamEventLimitReached)
+
+		streamEvents, err := eventsRepo.GetEventsByStream(context.Background(), db, nodeID.StreamID(), 0)
+		require.NoError(t, err)
+		require.Len(t, streamEvents, int(events.MaxEventsPerStream))
+	})
 }
 
 func TestSynapse_GetSchemas(t *testing.T) {

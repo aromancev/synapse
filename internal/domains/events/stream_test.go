@@ -71,6 +71,34 @@ func TestStream(t *testing.T) {
 		assert.Equal(t, EventType("init"), applied[0].EventType)
 		assert.Equal(t, EventType("update"), applied[1].EventType)
 	})
+
+	t.Run("Record rejects writes beyond max events per stream", func(t *testing.T) {
+		var existing []Event
+		for i := int64(1); i <= MaxEventsPerStream; i++ {
+			eventID, err := NewEventID()
+			require.NoError(t, err)
+			existing = append(existing, Event{
+				ID:            eventID,
+				StreamID:      StreamID("s-limit"),
+				StreamType:    StreamType("test"),
+				StreamVersion: i,
+				EventType:     EventType("test.event"),
+				EventVersion:  1,
+				OccurredAt:    i,
+				RecordedAt:    i,
+				Payload:       json.RawMessage(`{"v":1}`),
+				Meta:          json.RawMessage(`{}`),
+			})
+		}
+
+		stream := NewStream(StreamID("s-limit"), StreamType("test"), existing)
+		err := stream.Record(Request{EventType: EventType("test.event"), EventVersion: 1, OccurredAt: 101, Payload: "x", Meta: "y"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrStreamEventLimitReached)
+		assert.Contains(t, err.Error(), `stream_id="s-limit"`)
+		assert.Contains(t, err.Error(), `limit=100`)
+		assert.Empty(t, stream.RecordedEvents())
+	})
 }
 
 type testAggregate struct{ received *[]Event }

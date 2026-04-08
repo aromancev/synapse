@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+const MaxEventsPerStream int64 = 100
+
+var ErrStreamEventLimitReached = errors.New("stream has reached max events limit")
+
 // StreamID identifies an event stream.
 type StreamID string
 
@@ -112,6 +116,9 @@ func (s *Stream) AppliedEvents() []Event {
 func (s *Stream) Record(req Request) error {
 	if err := req.Validate(); err != nil {
 		return err
+	}
+	if s.nextVersion > MaxEventsPerStream {
+		return fmt.Errorf("%w: stream_id=%q stream_type=%q limit=%d", ErrStreamEventLimitReached, s.streamID, s.streamType, MaxEventsPerStream)
 	}
 	payloadJSON, err := json.Marshal(req.Payload)
 	if err != nil {
