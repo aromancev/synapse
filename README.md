@@ -1,8 +1,18 @@
 # Synapse
 
-Synapse is a local event-sourced knowledge graph for agents.
+Synapse solves the problem of storing and categorizing information for AI agents. I can be used to keep track of tasks, remember learnings to avoid making the same mistakes, store your favorite movies, etc.
 
-It lets you define JSON Schemas at runtime, store typed nodes, connect them with links, search by keywords, traverse the graph, and replicate the append-only event log elsewhere.
+You can also solve it with a bunch of `.md` files but that has a number of disadvandages:
+- Sooner or later the agent will go off the rails and start piling up different ways of structuring data onto each other. It is very bad at keeping unstructured data in order.
+- In order to inspect, search, and create new documents, the agent has to read a lot of content. This pollutes the context window and burns tokens. You can also solve it with vector search or by instructing the agent to use Python, but it is still unreliable and inefficient for some use cases.
+- Agents are terrible at understanding vague instructions. If you just tell it to "remember important stuff", it will write down some random things or (most often) nothing at all. It needs to know what exactly it is supposed to write down and how.
+
+One of the possible solutions to these issues is keeping a number of JSON schemas so that the agent can:
+- "Lint" the data it creates to make sure it's always in the expected shape.
+- Filter and transform the data **before** reading it (using `jq`). Since it knows the exact shape of the data, it can do so much more effeiciently.
+- Understand what types of data it needs to store because it knows all possible schemas the user cares about.
+
+This is basically what Synapse does. It's a minimal convenience layer to store structured JSON data. On top of it, it also provides associative links so that related data can be retrieved more efficiently (even if it's not semantically similar).
 
 ## What it does well
 
